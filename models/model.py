@@ -24,6 +24,8 @@ class TreeVAE(nn.Module):
 
         Attributes
         ----------
+        n_ary: int
+            The number of branches of the tree (e.g. 2 for binary tree)
         activation : str
             The name of the activation function for the reconstruction loss [sigmoid, mse]
         loss : models.losses
@@ -95,6 +97,9 @@ class TreeVAE(nn.Module):
         """
         super(TreeVAE, self).__init__()
         self.kwargs = kwargs
+
+        # Added by Dawoon Kwon for n-ary tree
+        self.n_ary = self.kwargs.get('n_ary', 2)  # Default to binary tree if n_ary is not specified
         
         self.activation = self.kwargs['activation']
         if self.activation == "sigmoid":

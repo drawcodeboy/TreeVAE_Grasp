@@ -24,6 +24,7 @@ def main():
 
     parser.add_argument('--num_clusters_data', type=int, help='the number of clusters in the data')
     parser.add_argument('--num_clusters_tree', type=int, help='the max number of leaves of the tree')
+    parser.add_argument('--n_ary', type=int, help='the number of branches of the tree (e.g. 2 for binary tree)')
 
     parser.add_argument('--kl_start', type=float, nargs='?', const=0.,
                         help='initial KL divergence from where annealing starts')

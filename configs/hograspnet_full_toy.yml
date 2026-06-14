@@ -7,6 +7,7 @@ data:
   test_ratio: 0.15
   split_trials: 100
   num_clusters_data: 28 # number of classes
+  n_ary: 3
 
 training:
   num_epochs: 150
@@ -35,7 +36,7 @@ training:
 
   grow: True
   prune: True
-  num_clusters_tree: 10
+  num_clusters_tree: 10 # 트리가 가질 수 있는 최대 leaf 노드 수 (즉, 트리의 최대 크기)
   augment: True
   augmentation_method: 'InfoNCE,instancewise_full' 
   aug_decisions_weight: 100
