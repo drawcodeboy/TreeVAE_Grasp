@@ -335,13 +335,20 @@ class Dense(nn.Module):
 
 
 class Router(nn.Module):
-    def __init__(self, input_size, hidden_units=128):
+    def __init__(self, input_size, n_ary=2, hidden_units=128):
         super(Router, self).__init__()
+
+        self.n_ary = n_ary
         self.dense1 = nn.Linear(input_size, hidden_units, bias=False)
         self.dense2 = nn.Linear(hidden_units, hidden_units, bias=False)
         self.bn1 = nn.BatchNorm1d(hidden_units)
         self.bn2 = nn.BatchNorm1d(hidden_units)
-        self.dense3 = nn.Linear(hidden_units, 1)
+        if self.n_ary == 2:
+            self.dense3 = nn.Linear(hidden_units, 1)
+        elif self.n_ary >= 3:
+            self.dense3 = nn.Linear(hidden_units, self.n_ary)
+        else:
+            raise ValueError("n_ary must be at least 2")
 
     def forward(self, inputs, return_last_layer=False):
         x = self.dense1(inputs)
@@ -350,7 +357,12 @@ class Router(nn.Module):
         x = self.dense2(x)
         x = self.bn2(x)
         x = actvn(x)
-        d = F.sigmoid(self.dense3(x))
+
+        if self.n_ary == 2:
+            d = F.sigmoid(self.dense3(x))
+        else: # n_ary >= 3
+            d = F.softmax(self.dense3(x), dim=1)
+
         if return_last_layer:
             return d, x
         else:

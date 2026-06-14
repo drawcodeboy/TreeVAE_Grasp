@@ -100,7 +100,7 @@ class TreeVAE(nn.Module):
 
         # Added by Dawoon Kwon for n-ary tree
         self.n_ary = self.kwargs.get('n_ary', 2)  # Default to binary tree if n_ary is not specified
-        
+
         self.activation = self.kwargs['activation']
         if self.activation == "sigmoid":
             self.loss = loss_reconstruction_binary
@@ -179,8 +179,8 @@ class TreeVAE(nn.Module):
         self.decisions_q = nn.ModuleList([])
         for i in range(self.depth):
             for _ in range(2 ** i):
-                self.decisions.append(Router(encoded_size_gen[i], hidden_units=layers_gen[i])) # Router at node of depth i
-                self.decisions_q.append(Router(layers_gen[i], hidden_units=layers_gen[i]))
+                self.decisions.append(Router(encoded_size_gen[i], n_ary=self.n_ary, hidden_units=layers_gen[i])) # Router at node of depth i
+                self.decisions_q.append(Router(layers_gen[i], n_ary=self.n_ary, hidden_units=layers_gen[i]))
         # the leaves do not have decisions (we set it to None)
         for _ in range(2 ** (self.depth)):
             self.decisions.append(None)

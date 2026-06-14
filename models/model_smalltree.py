@@ -63,7 +63,8 @@ class SmallTreeVAE(nn.Module):
         """
         super(SmallTreeVAE, self).__init__()
         self.kwargs = kwargs
-        
+        self.n_ary = self.kwargs['n_ary']
+
         self.activation = self.kwargs['activation']
         if self.activation == "sigmoid":
             self.loss = loss_reconstruction_binary
@@ -89,8 +90,8 @@ class SmallTreeVAE(nn.Module):
 
         self.denses = nn.ModuleList([Dense(self.hidden_layer[1], self.encoded_size[1]) for _ in range(2)])
         self.transformations = nn.ModuleList([MLP(self.encoded_size[0], self.encoded_size[1], self.hidden_layer[0]) for _ in range(2)])
-        self.decision = Router(self.encoded_size[0], hidden_units=self.hidden_layer[0])
-        self.decision_q = Router(self.hidden_layer[0], hidden_units=self.hidden_layer[0])
+        self.decision = Router(self.encoded_size[0], n_ary=self.n_ary, hidden_units=self.hidden_layer[0])
+        self.decision_q = Router(self.hidden_layer[0], n_ary=self.n_ary, hidden_units=self.hidden_layer[0])
         self.decoders = nn.ModuleList([get_decoder(architecture=self.kwargs['encoder'], input_shape=self.encoded_size[1],
                                                   output_shape=self.inp_shape, activation=self.activation) for _ in range(2)])
 
