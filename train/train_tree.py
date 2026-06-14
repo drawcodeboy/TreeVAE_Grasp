@@ -53,8 +53,9 @@ def run_tree(trainset, trainset_eval, testset, device, configs):
 	model = TreeVAE(**configs['training'])
 	model.to(device)
 
-	if graph_mode:
-		model = torch.compile(model)
+	# print(graph_mode); import sys; sys.exit()
+	# if graph_mode:
+		# model = torch.compile(model)
 
 	optimizer = get_optimizer(model, configs)
 

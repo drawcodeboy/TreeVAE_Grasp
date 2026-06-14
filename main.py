@@ -50,13 +50,13 @@ def main():
 
     # Specify config name
     parser.add_argument('--config_name', default='mnist', type=str,
-                        choices=['mnist', 'fmnist', 'news20', 'omniglot', 'cifar10', 'cifar100', 'celeba'],
+                        choices=['mnist', 'fmnist', 'news20', 'omniglot', 'cifar10', 'cifar100', 'celeba', 
+                                 'dexgraspnet_toy', 'dexgraspnet', 'hograspnet_full_toy', 'hograspnet_uniform_toy'],
                         help='the override file name for config.yml')
 
     args = parser.parse_args()
     configs = prepare_config(args, project_dir)
     run_experiment(configs)
-
 
 if __name__ == "__main__":
     main()

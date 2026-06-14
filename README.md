@@ -39,3 +39,10 @@ url={https://openreview.net/forum?id=adq0oXb9KM}
 srun --partition=intern --qos=intern_qos --gres=gpu:1 --cpus-per-task=4 --mem=16G --time=02:00:00 --pty bash -l
 conda env create -f treevae.yml
 ```
+
+```bash
+# For debugging
+srun --partition=intern --qos=intern_qos --gres=gpu:1 --cpus-per-task=4 --mem=16G --time=02:00:00 --pty bash -l
+conda activate treevae
+python main.py --config_name=dexgraspnet_toy
+```

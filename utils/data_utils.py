@@ -2,6 +2,9 @@
 Utility functions for data loading.
 """
 import os
+from datasets.dexgraspnet_toy import DexGraspNetToyDataset
+from datasets.hograspnet_toy import HOGraspNetToyDataset
+from datasets.augmentation import RandomYawRotation, RandomJitter
 import torch
 import torchvision
 import torchvision.transforms as T
@@ -260,7 +263,6 @@ def get_data(configs):
 		else:
 			transform = transform_eval 
 
-
 		full_trainset = torchvision.datasets.CelebA(root=data_path, split='train', target_type='attr', target_transform=lambda y: 0, download=True, transform=transform)
 		full_trainset_eval = torchvision.datasets.CelebA(root=data_path, split='train', target_type='attr', target_transform=lambda y: 0, download=True, transform=transform_eval)
 		full_testset = torchvision.datasets.CelebA(root=data_path, split='test', target_type='attr', target_transform=lambda y: 0, download=True, transform=transform_eval)
@@ -275,10 +277,68 @@ def get_data(configs):
 		trainset_eval.dataset.targets = torch.zeros(trainset.dataset.attr.shape[0], dtype=torch.int8)
 		testset.dataset.targets = torch.zeros(trainset.dataset.attr.shape[0], dtype=torch.int8)
 
+	elif data_name == 'dexgraspnet_toy':
+		reset_random_seeds(configs['globals']['seed'])
+
+		transform_eval = T.Compose([
+			])
+		if augment is True:
+			aug_transforms = T.Compose([
+				RandomYawRotation(),
+				RandomJitter(),
+			])
+			if augmentation_method == ['simple']:
+				transform = aug_transforms
+			else:
+				transform = ContrastiveTransformations(aug_transforms, n_views=2)
+		else:
+			transform = transform_eval
+
+		trainset = DexGraspNetToyDataset(cfg=configs['data'], split='train', transform=transform)
+		trainset_eval = DexGraspNetToyDataset(cfg=configs['data'], split='train', transform=transform_eval)
+		testset = DexGraspNetToyDataset(cfg=configs['data'], split='test', transform=transform_eval)
+
+	elif data_name == 'hograspnet_full_toy':
+		reset_random_seeds(configs['globals']['seed'])
+
+		transform_eval = T.Compose([])
+
+		if augment is True:
+			aug_transforms = T.Compose([
+				RandomYawRotation(),
+				RandomJitter(),
+			])
+			if augmentation_method == ['simple']:
+				transform = aug_transforms
+			else:
+				transform = ContrastiveTransformations(aug_transforms, n_views=2)
+		else:
+			transform = transform_eval
+
+		trainset = HOGraspNetToyDataset(root=configs['data']['root'],
+								  		split='train',
+								  		setup=configs['data']['setup'],
+										test_ratio=configs['data']['test_ratio'],
+										split_trials=configs['data']['split_trials'],
+										transform=transform)
+		trainset_eval = HOGraspNetToyDataset(root=configs['data']['root'],
+								  		     split='train',
+								  			 setup=configs['data']['setup'],
+											 test_ratio=configs['data']['test_ratio'],
+											 split_trials=configs['data']['split_trials'],
+											 transform=transform_eval)
+		testset = HOGraspNetToyDataset(root=configs['data']['root'],
+								  	   split='test',
+								  	   setup=configs['data']['setup'],
+									   test_ratio=configs['data']['test_ratio'],
+									   split_trials=configs['data']['split_trials'],
+									   transform=transform_eval)
+
 	else:
 		raise NotImplementedError('This dataset is not supported!')
 	
-	assert trainset.__class__ == testset.__class__ == trainset_eval.__class__ == Subset
+	# 아래 assert문은 CustomDataset을 사용하는 이상 관계가 없어보임
+	# assert trainset.__class__ == testset.__class__ == trainset_eval.__class__ == Subset
 	return trainset, trainset_eval, testset
 
 

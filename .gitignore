@@ -149,3 +149,6 @@ dataset/*
 data/*
 logs/*
 datasets/*
+
+# cache
+cache/*

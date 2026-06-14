@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.distributions as td
 from utils.model_utils import construct_tree, compute_posterior
 from models.networks import get_encoder, get_decoder, MLP, Router, Dense
+from models.networks_pc import get_encoder_pc, get_decoder_pc
 from models.losses import loss_reconstruction_binary, loss_reconstruction_mse
 from utils.model_utils import return_list_tree
 from utils.training_utils import calc_aug_loss
@@ -121,6 +122,7 @@ class TreeVAE(nn.Module):
         self.return_elbo = torch.tensor([False])
 
         # bottom up: the inference chain that from input computes the d units till the root
+        '''
         if self.activation == "mse":
             size = int((self.inp_shape / 3)**0.5)
             encoder = get_encoder(architecture=self.kwargs['encoder'], encoded_size=self.hidden_layers[0],
@@ -128,6 +130,10 @@ class TreeVAE(nn.Module):
         else:
             encoder = get_encoder(architecture=self.kwargs['encoder'], encoded_size=self.hidden_layers[0],
                                 x_shape=self.inp_shape)   
+        '''
+        encoder = get_encoder_pc(architecture=self.kwargs['encoder']['architecture'], 
+                                 encoded_size=self.hidden_layers[0], 
+                                 num_points=self.kwargs['encoder']['num_points'])
 
         self.bottom_up = nn.ModuleList([encoder])
         for i in range(1, len(self.hidden_layers)):
@@ -178,9 +184,15 @@ class TreeVAE(nn.Module):
         # compute the list of decoders to attach to each node, note that internal nodes do not have a decoder
         # e.g. for a tree with depth 2: decoders = [None, None, None, Dec, Dec, Dec, Dec]
         self.decoders = nn.ModuleList([None for i in range(self.depth) for j in range(2 ** i)])
+        '''
         for _ in range(2 ** (self.depth)):
             self.decoders.append(get_decoder(architecture=self.kwargs['encoder'], input_shape=encoded_size_gen[-1], 
                                             output_shape=self.inp_shape, activation=self.activation))
+        '''
+        for _ in range(2 ** (self.depth)):
+            self.decoders.append(get_decoder_pc(architecture=self.kwargs['decoder']['architecture'], 
+                                                input_shape=encoded_size_gen[-1],
+                                                num_points=self.kwargs['decoder']['num_points']))
 
         # construct the tree
         self.tree = construct_tree(transformations=self.transformations, routers=self.decisions,
