@@ -107,7 +107,7 @@ def prepare_config(args, project_dir):
 	if configs['training']['augment'] is True and configs['training']['augmentation_method'] != ['simple'] and configs['training']['batch_size'] % 2 != 0:
 		configs['training']['batch_size'] += 1
 
-	# Added by Dawoon Kwon for n-ary tree
+	# for n-ary tree
 	if 'n_ary' not in configs['training']:
 		configs['training']['n_ary'] = 2
 
@@ -116,7 +116,7 @@ def prepare_config(args, project_dir):
 	if configs['training']['n_ary'] < 2:
 		raise ValueError("n_ary must be at least 2")
 
-	# Added by Dawoon Kwon for n-ary tree: Check that num_clusters_tree is at least n_ary
+	# for n-ary tree: Check that num_clusters_tree is at least n_ary
 	# tree가 가져야 할 leaf node의 최대 개수는 n_ary보다 커야 트리가 제대로 성장할 수 있기 때문
 	n_ary = configs['training']['n_ary']
 	num_clusters_tree = configs['training']['num_clusters_tree']

@@ -345,7 +345,7 @@ class Router(nn.Module):
         self.bn2 = nn.BatchNorm1d(hidden_units)
         if self.n_ary == 2:
             self.dense3 = nn.Linear(hidden_units, 1)
-        elif self.n_ary >= 3:
+        elif self.n_ary > 2:
             self.dense3 = nn.Linear(hidden_units, self.n_ary)
         else:
             raise ValueError("n_ary must be at least 2")

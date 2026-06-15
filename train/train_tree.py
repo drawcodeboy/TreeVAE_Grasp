@@ -162,7 +162,9 @@ def run_tree(trainset, trainset_eval, testset, device, configs):
 		model.attach_smalltree(node, small_model)
 
 		# Check if reached the max number of effective leaves before finetuning unnecessarily
-		if n_effective_leaves + 1 == configs['training']['num_clusters_tree']:
+		# split 할 때마다 leaf의 증가량은 n_ary - 1이다.
+		leaf_increment = configs['training']['n_ary'] - 1
+		if n_effective_leaves + leaf_increment >= configs['training']['num_clusters_tree']:
 			node_leaves_train = predict(gen_train_eval, model, device, 'node_leaves')
 			_, _, max_growth = compute_growing_leaf(gen_train_eval, model, node_leaves_train, max_depth,
 													configs['training']['batch_size'],
@@ -204,15 +206,25 @@ def run_tree(trainset, trainset_eval, testset, device, configs):
 			# prune leaves and internal nodes without children
 			print(f'\nPruning leaf {ind_leaf}!\n')
 			current_node = leaf['node']
-			while all(child is None for child in [current_node.left, current_node.right]):
-				if current_node.parent is not None:
-					parent = current_node.parent
-				# root does not get pruned
-				else:
-					break
-				parent.prune_child(current_node)
-				current_node = parent
 
+			if model.n_ary == 2:
+				while all(child is None for child in [current_node.left, current_node.right]):
+					if current_node.parent is not None:
+						parent = current_node.parent
+					# root does not get pruned
+					else:
+						break
+					parent.prune_child(current_node)
+					current_node = parent
+			elif model.n_ary > 2:
+				while not current_node.has_children():
+					if current_node.parent is not None:
+						parent = current_node.parent
+					# root does not get pruned
+					else:
+						break
+					parent.prune_child(current_node)
+					current_node = parent
 
 			# reinitialize model
 			transformations, routers, denses, decoders, routers_q = return_list_tree(model.tree)

@@ -329,25 +329,35 @@ def get_ind_small_tree(node_leaves, n_effective_leaves):
     return ind
 
 
-def compute_leaves(tree):
+def compute_leaves(tree, n_ary):
     list_nodes = [{'node': tree, 'depth': 0}]
     nodes_leaves = []
     while len(list_nodes) != 0:
         current_node = list_nodes.pop(0)
         node, depth_level = current_node['node'], current_node['depth']
-        if node.router is not None:
-            node_left, node_right = node.left, node.right
-            list_nodes.append(
-                {'node': node_left, 'depth': depth_level + 1})
-            list_nodes.append({'node': node_right, 'depth': depth_level + 1})
-        elif node.router is None and node.decoder is None:
-            # We are in an internal node with pruned leaves and thus only have one child
-            node_left, node_right = node.left, node.right
-            child = node_left if node_left is not None else node_right
-            list_nodes.append(
-                {'node': child, 'depth': depth_level + 1})
-        else:
-            nodes_leaves.append(current_node)
+
+        if n_ary == 2:
+            if node.router is not None:
+                node_left, node_right = node.left, node.right
+                list_nodes.append(
+                    {'node': node_left, 'depth': depth_level + 1})
+                list_nodes.append({'node': node_right, 'depth': depth_level + 1})
+            elif node.router is None and node.decoder is None:
+                # We are in an internal node with pruned leaves and thus only have one child
+                node_left, node_right = node.left, node.right
+                child = node_left if node_left is not None else node_right
+                list_nodes.append(
+                    {'node': child, 'depth': depth_level + 1})
+            else:
+                nodes_leaves.append(current_node)
+        elif n_ary > 2:
+            if node.router is not None:
+                for child in node.active_children():
+                    list_nodes.append({'node': child, 'depth': depth_level + 1})
+            elif node.router is None and node.decoder is None:
+                list_nodes.append({'node': node.single_child(), 'depth': depth_level + 1})
+            else:
+                nodes_leaves.append(current_node)
     return nodes_leaves
 
 
@@ -387,7 +397,10 @@ def compute_growing_leaf(loader, model, node_leaves, max_depth, batch_size, max_
     print("\nNumber of effective leaves: ", n_effective_leaves)
 
     # grow until reaching required n_effective_leaves
-    if n_effective_leaves >= max_leaves:
+    leaf_increment = model.n_ary - 1
+    projected_leaves = n_effective_leaves + leaf_increment
+
+    if n_effective_leaves >= max_leaves or projected_leaves > max_leaves:
         print('\nReached maximum number of leaves\n')
         return None, None, True
 
@@ -395,7 +408,7 @@ def compute_growing_leaf(loader, model, node_leaves, max_depth, batch_size, max_
         return None, None, False
 
     else:
-        leaves = compute_leaves(model.tree)
+        leaves = compute_leaves(model.tree, model.n_ary)
         n_samples = []
         if loader.dataset.dataset.__class__ is TensorDataset:
             y_train = loader.dataset.dataset.tensors[1][loader.dataset.indices]
@@ -439,7 +452,7 @@ def compute_growing_leaf(loader, model, node_leaves, max_depth, batch_size, max_
 
 
 def compute_pruning_leaf(model, node_leaves_train):
-    leaves = compute_leaves(model.tree)
+    leaves = compute_leaves(model.tree, model.n_ary)
     n_leaves = len(node_leaves_train)
     weights = [node_leaves_train[i]['prob'] for i in range(n_leaves)]
 

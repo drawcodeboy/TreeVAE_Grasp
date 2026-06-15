@@ -14,6 +14,7 @@ def compute_posterior(mu_q, mu_p, sigma_q, sigma_p):
 
 def construct_tree(transformations, routers, routers_q, denses, decoders, n_ary=2):
 	"""
+		construct_tree()는 미리 만들어둔 module list들을 실제 Node tree 구조에 붙여서 root node를 반환하는 함수이다.
 		Construct the tree by passing a list of transformations and routers from root to leaves visiting nodes
 		layer-wise from left to right
 
@@ -32,8 +33,42 @@ def construct_tree(transformations, routers, routers_q, denses, decoders, n_ary=
 		root.insert(transformation=transformations[i], router=routers[i], routers_q=routers_q[i], dense=denses[i], decoder=decoders[i])
 	return root
 
-
 class Node:
+	'''
+		Description
+		-----------
+
+
+		Attributes
+		----------
+		left : 
+
+		right : 
+
+		parent : 
+
+		transformation : 
+			parent node의 sample을 받아서 현재 node의 mu, sigma를 return하는 function (neural network)
+			root node의 경우 parent node가 없기 때문에, transformation을 가지고 있을 필요 없음
+		dense : 
+			Dense는 입력 x에서 추출한 depth-specific bottom-up embedding d를 현재 node의 latent posterior parameter로 변환하여, 
+			각 node의 latent variable이 x의 정보를 반영하도록 하는 inference network이다.
+		router : 
+			현재 node로부터 각 child node로 갈 확률을 리턴해주는 function (neural network)
+			leaf node의 경우 child node가 없기 때문에, router를 가지고 있을 필요 없음
+		router_q : 
+
+		decoder : 
+
+		expand : bool
+ 
+		n_ary : int
+			해당 노드의 진수를 정함
+		children : 
+		
+		Methods
+		-------
+	'''
 	def __init__(self, transformation, router, routers_q, dense, decoder=None, expand=True, n_ary=2):
 		self.left = None
 		self.right = None
@@ -44,8 +79,8 @@ class Node:
 		self.routers_q = routers_q
 		self.decoder = decoder
 		self.expand = expand
-		self.n_ary = n_ary # Added by Dawoon Kwon
-		self.children = [None for _ in range(n_ary)] # Added by Dawoon Kwon
+		self.n_ary = n_ary
+		self.children = [None for _ in range(n_ary)]
 
 	def child_slots(self):
 		if self.n_ary == 2:
@@ -71,10 +106,12 @@ class Node:
 	def insert(self, transformation=None, router=None, routers_q=None, dense=None, decoder=None):
 		'''
 		이 함수는 기존 트리에 노드를 하나 삽입하는 역할을 수행한다.
-		left 노드가 없으면, left 노드를 하나 삽입하고 함수를 종료
-		left 노드가 있으면, right 노드를 하나 삽입하고 함수를 종료
-		left, right 노드가 둘 다 있으면, left 노드의 child 노드를 탐색하여 어떻게든 하나의 노드를 삽입하고 함수를 종료
-
+		[이진 트리의 경우]
+			left 노드가 없으면, left 노드를 하나 삽입하고 함수를 종료
+			left 노드가 있으면, right 노드를 하나 삽입하고 함수를 종료
+			left, right 노드가 둘 다 있으면, left 노드의 child 노드를 탐색하여 어떻게든 하나의 노드를 삽입하고 함수를 종료
+		[N-ary tree]
+			하위 노드에 어떻게든 새롭게 삽입한다.
 		'''
 		queue = []
 		node = self

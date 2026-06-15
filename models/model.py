@@ -98,7 +98,7 @@ class TreeVAE(nn.Module):
         super(TreeVAE, self).__init__()
         self.kwargs = kwargs
 
-        # Added by Dawoon Kwon for n-ary tree
+        # for n-ary tree
         self.n_ary = self.kwargs.get('n_ary', 2)  # Default to binary tree if n_ary is not specified
 
         self.activation = self.kwargs['activation']
@@ -127,7 +127,12 @@ class TreeVAE(nn.Module):
         self.return_elbo = torch.tensor([False])
 
         # bottom up: the inference chain that from input computes the d units till the root
+        # 각 depth에 대한 d_H를 추출하는 과정을 encoder가 맡아서 한다.
+        # config에서 mlp_layers의 length가 depth가 얼마인지를 결정짓는다.
+        # 가장 처음에는 x를 입력으로 받아 d_H를 추출하기 때문에, 고차원 데이터를 처리하는 encoder(e.g. PointNet)이 필요하다.
+        # 이후, d_H는 d_{H-1}, ...를 추출하기 위해 MLP를 사용한다. -> self.bottom_up에 담김
         '''
+        # Point cloud가 아닌 image data를 활용할 때, 필요한 라인
         if self.activation == "mse":
             size = int((self.inp_shape / 3)**0.5)
             encoder = get_encoder(architecture=self.kwargs['encoder'], encoded_size=self.hidden_layers[0],
@@ -144,6 +149,8 @@ class TreeVAE(nn.Module):
         for i in range(1, len(self.hidden_layers)):
             self.bottom_up.append(MLP(self.hidden_layers[i-1], self.encoded_sizes[i], self.hidden_layers[i]))
 
+        # -----------------------------------------------------------------------------------------------------
+
         # MLP's if we use contrastive loss on d's
         if len([i for i in self.augmentation_method if i in ['instancewise_first', 'instancewise_full']]) > 0:
             self.contrastive_mlp = nn.ModuleList([])
@@ -158,23 +165,48 @@ class TreeVAE(nn.Module):
         # e.g. for bottom up [MLP(256, 32), MLP(128, 16), MLP(64, 8)] the list of top-down transformations are
         # [None, MLP(16, 64), MLP(16, 64), MLP(32, 128), MLP(32, 128), MLP(32, 128), MLP(32, 128)]
 
+        # -----------------------------------------------------------------------------------------------------
+
         # select the top down generative networks
+        # self.encoded_sizes = self.kwargs['latent_dim']
+        # self.hidden_layers = self.kwargs['mlp_layers']
+        # -(self.depth+1)는 config에서 1을 잡은 이상 항상 0이 나온다고 보면됨
+        # 그리고, self.encoded_sizes, self.hidden_layers의 순서는 bottom-up 전제니까
+        # 이를 뒤집었다고 해석하면 됨. -> top-down
+        # encoded_size_gen = z embedding dim, layers_gen = d embedding dim
         encoded_size_gen = self.encoded_sizes[-(self.depth+1):]  # e.g. encoded_sizes 32,16,8, depth 1
         encoded_size_gen = encoded_size_gen[::-1]  # encoded_size_gen = 16,8 => 8,16
         layers_gen = self.hidden_layers[-(self.depth+1):]  # e.g. encoded_sizes 256,128,64, depth 1
         layers_gen = layers_gen[::-1]  # encoded_size_gen = 128,64 => 64,128
 
+        # -----------------------------------------------------------------------------------------------------
+
         # add root transformation and dense layer, the dense layer is layer that connects the bottom-up with the nodes
+        # root node의 transformation, dense
+        # root node는 transformation 필요 없음
+        # 모든 node는 dense가 필요함.
         self.transformations = nn.ModuleList([None])
         self.denses = nn.ModuleList([Dense(layers_gen[0], encoded_size_gen[0])])
+
+        # -----------------------------------------------------------------------------------------------------
+
         # attach the rest of transformations and dense layers for each node
+        # root노드의 child node set의 transformation과 dense
+        # (만약, self.depth가 1보다 크게 설정 되어있다면 다르겠지만, 기본 세팅을 가져감)
         for i in range(self.depth):
             for j in range(self.n_ary ** (i + 1)):
                 self.transformations.append(MLP(encoded_size_gen[i], encoded_size_gen[i+1], layers_gen[i])) # MLP from depth i to i+1
                 self.denses.append(Dense(layers_gen[i+1], encoded_size_gen[i+1])) # Dense at depth i+1 from bottom-up to top-down
 
+        # -----------------------------------------------------------------------------------------------------
+
         # compute the list of decisions for both bottom-up (decisions_q) and top-down (decisions)
         # for each node of the tree
+        # Router는 generative model(self.decisions)에도 있고, inference model(self.decisions_q)에도 있다.
+        # generative model 용도는 z_sample을 받고, inference model 용도는 bottom-up depth-specific depth d를 받아서
+        # child node들에 대한 각 path의 확률을 출력한다.
+        # recon할 때는 decision_q, generate할 때는 decision
+        # 그리고, 학습할 때는 decision_q와 decision 간에 KL_{decision}
         self.decisions = nn.ModuleList([])
         self.decisions_q = nn.ModuleList([])
         for i in range(self.depth):
@@ -182,13 +214,23 @@ class TreeVAE(nn.Module):
                 self.decisions.append(Router(encoded_size_gen[i], n_ary=self.n_ary, hidden_units=layers_gen[i])) # Router at node of depth i
                 self.decisions_q.append(Router(layers_gen[i], n_ary=self.n_ary, hidden_units=layers_gen[i]))
         # the leaves do not have decisions (we set it to None)
+        # leaf node는 decision (Router)가 필요하지 않음
         for _ in range(self.n_ary ** (self.depth)):
             self.decisions.append(None)
             self.decisions_q.append(None)
 
+        # -----------------------------------------------------------------------------------------------------
+
         # compute the list of decoders to attach to each node, note that internal nodes do not have a decoder
         # e.g. for a tree with depth 2: decoders = [None, None, None, Dec, Dec, Dec, Dec]
-        self.decoders = nn.ModuleList([None for i in range(self.depth) for j in range(self.n_ary ** i)])
+        # self.decoders = nn.ModuleList([None for i in range(self.depth) for j in range(self.n_ary ** i)])
+        # 만약 self.depth = 1, self.n_ary = 3 -> [None, Dec, Dec, Dec]
+        decoders = []
+        for i in range(self.depth):
+            for j in range(self.n_ary ** i):
+                decoders.append(None)
+
+        self.decoders = nn.ModuleList(decoders)
         '''
         for _ in range(2 ** (self.depth)):
             self.decoders.append(get_decoder(architecture=self.kwargs['encoder'], input_shape=encoded_size_gen[-1], 
@@ -284,6 +326,7 @@ class TreeVAE(nn.Module):
                 _, z_mu_p, z_sigma_p = node.transformation(z_parent_sample)
                 z_p = td.Independent(td.Normal(z_mu_p, torch.sqrt(z_sigma_p + epsilon)), 1)
                 # to avoid posterior collapse there is a share of information between the bottom-up and top-down
+                # 그런데, 궁금한 게 posterior mu, sigma 계산할 때, 왜 바로 dense에서 나온 거 안 쓰고 prior에서 나오는 mu, sigma 섞어서 쓰는 건가?
                 z_mu_q, z_sigma_q = compute_posterior(z_mu_q_hat, z_mu_p, z_sigma_q_hat, z_sigma_p)
 
             # compute sample z using mu_q and sigma_q
@@ -303,6 +346,8 @@ class TreeVAE(nn.Module):
             if node.router is not None:
                 if self.n_ary == 2:
                     # compute the probability of the sample to go to the left child
+                    # 아래에서 generative model의 node.router(z_sample)과 inference model의 node.routers_q(d)를 둘 다 써서
+                    # 당황스러울 수 있으나, generative model의 node.router(z_sample)을 쓰는 것은 KL_{decisions}만을 쓰기 위함이다.
                     prob_child_left = node.router(z_sample).squeeze()
                     prob_child_left_q = node.routers_q(d).squeeze()
 

@@ -88,12 +88,12 @@ class SmallTreeVAE(nn.Module):
         self.augmentation_method = self.kwargs['augmentation_method']
         self.aug_decisions_weight = self.kwargs['aug_decisions_weight']
 
-        self.denses = nn.ModuleList([Dense(self.hidden_layer[1], self.encoded_size[1]) for _ in range(2)])
-        self.transformations = nn.ModuleList([MLP(self.encoded_size[0], self.encoded_size[1], self.hidden_layer[0]) for _ in range(2)])
+        self.denses = nn.ModuleList([Dense(self.hidden_layer[1], self.encoded_size[1]) for _ in range(self.n_ary)])
+        self.transformations = nn.ModuleList([MLP(self.encoded_size[0], self.encoded_size[1], self.hidden_layer[0]) for _ in range(self.n_ary)])
         self.decision = Router(self.encoded_size[0], n_ary=self.n_ary, hidden_units=self.hidden_layer[0])
         self.decision_q = Router(self.hidden_layer[0], n_ary=self.n_ary, hidden_units=self.hidden_layer[0])
         self.decoders = nn.ModuleList([get_decoder(architecture=self.kwargs['encoder'], input_shape=self.encoded_size[1],
-                                                  output_shape=self.inp_shape, activation=self.activation) for _ in range(2)])
+                                                  output_shape=self.inp_shape, activation=self.activation) for _ in range(self.n_ary)])
 
     def forward(self, x, z_parent, p, bottom_up):
         """
@@ -129,24 +129,43 @@ class SmallTreeVAE(nn.Module):
         d_q = bottom_up[-self.depth]
         d = bottom_up[-self.depth - 1]
         
-        prob_child_left = self.decision(z_parent).squeeze()
-        prob_child_left_q = self.decision_q(d_q).squeeze()
-        leaves_prob = [p * prob_child_left_q, p * (1 - prob_child_left_q)]
+        if self.n_ary == 2:
+            prob_child_left = self.decision(z_parent).squeeze()
+            prob_child_left_q = self.decision_q(d_q).squeeze()
+            leaves_prob = [p * prob_child_left_q, p * (1 - prob_child_left_q)]
 
-        kl_decisions = prob_child_left_q * torch.log(epsilon + prob_child_left_q / (prob_child_left + epsilon)) +\
-                        (1 - prob_child_left_q) * torch.log(epsilon + (1 - prob_child_left_q) /
-                                                                (1 - prob_child_left + epsilon))
-        kl_decisions = torch.mean(p * kl_decisions)
+            kl_decisions = prob_child_left_q * torch.log(epsilon + prob_child_left_q / (prob_child_left + epsilon)) +\
+                            (1 - prob_child_left_q) * torch.log(epsilon + (1 - prob_child_left_q) /
+                                                                    (1 - prob_child_left + epsilon))
+            kl_decisions = torch.mean(p * kl_decisions)
+            
         
-        # Contrastive loss
-        aug_decisions_loss = torch.zeros(1, device=device)
-        if self.training is True and self.augment is True and 'simple' not in self.augmentation_method:
-            aug_decisions_loss += calc_aug_loss(prob_parent=p, prob_router=prob_child_left_q,
-                                                augmentation_methods=self.augmentation_method)
+            # Contrastive loss
+            aug_decisions_loss = torch.zeros(1, device=device)
+            if self.training is True and self.augment is True and 'simple' not in self.augmentation_method:
+                aug_decisions_loss += calc_aug_loss(prob_parent=p, prob_router=prob_child_left_q,
+                                                    augmentation_methods=self.augmentation_method)
+                
+        elif self.n_ary > 2:
+            prob_child = self.decision(z_parent)
+            prob_child_q = self.decision_q(d_q)
+
+            leaves_prob = [
+                p * prob_child_q[:, i]
+                for i in range(self.n_ary)
+            ]
+
+            kl_decisions = prob_child_q * (
+                (prob_child_q + epsilon).log() - (prob_child + epsilon).log()
+            )
+            kl_decisions = torch.mean(p * kl_decisions.sum(dim=1))
+
+            aug_decisions_loss = torch.zeros(1, device=device)
+            # n-ary calc_aug_loss 대응 전까지는 여기서 skip 또는 별도 구현 필요
 
         reconstructions = []
         kl_nodes = torch.zeros(1, device=device)
-        for i in range(2):
+        for i in range(self.n_ary):
             # Compute posterior parameters
             z_mu_q_hat, z_sigma_q_hat = self.denses[i](d)
             _, z_mu_p, z_sigma_p = self.transformations[i](z_parent)
