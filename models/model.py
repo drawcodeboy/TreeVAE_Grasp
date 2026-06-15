@@ -169,7 +169,7 @@ class TreeVAE(nn.Module):
         self.denses = nn.ModuleList([Dense(layers_gen[0], encoded_size_gen[0])])
         # attach the rest of transformations and dense layers for each node
         for i in range(self.depth):
-            for j in range(2 ** (i + 1)):
+            for j in range(self.n_ary ** (i + 1)):
                 self.transformations.append(MLP(encoded_size_gen[i], encoded_size_gen[i+1], layers_gen[i])) # MLP from depth i to i+1
                 self.denses.append(Dense(layers_gen[i+1], encoded_size_gen[i+1])) # Dense at depth i+1 from bottom-up to top-down
 
@@ -178,23 +178,23 @@ class TreeVAE(nn.Module):
         self.decisions = nn.ModuleList([])
         self.decisions_q = nn.ModuleList([])
         for i in range(self.depth):
-            for _ in range(2 ** i):
+            for _ in range(self.n_ary ** i):
                 self.decisions.append(Router(encoded_size_gen[i], n_ary=self.n_ary, hidden_units=layers_gen[i])) # Router at node of depth i
                 self.decisions_q.append(Router(layers_gen[i], n_ary=self.n_ary, hidden_units=layers_gen[i]))
         # the leaves do not have decisions (we set it to None)
-        for _ in range(2 ** (self.depth)):
+        for _ in range(self.n_ary ** (self.depth)):
             self.decisions.append(None)
             self.decisions_q.append(None)
 
         # compute the list of decoders to attach to each node, note that internal nodes do not have a decoder
         # e.g. for a tree with depth 2: decoders = [None, None, None, Dec, Dec, Dec, Dec]
-        self.decoders = nn.ModuleList([None for i in range(self.depth) for j in range(2 ** i)])
+        self.decoders = nn.ModuleList([None for i in range(self.depth) for j in range(self.n_ary ** i)])
         '''
         for _ in range(2 ** (self.depth)):
             self.decoders.append(get_decoder(architecture=self.kwargs['encoder'], input_shape=encoded_size_gen[-1], 
                                             output_shape=self.inp_shape, activation=self.activation))
         '''
-        for _ in range(2 ** (self.depth)):
+        for _ in range(self.n_ary ** (self.depth)):
             self.decoders.append(get_decoder_pc(architecture=self.kwargs['decoder']['architecture'], 
                                                 input_shape=encoded_size_gen[-1],
                                                 num_points=self.kwargs['decoder']['num_points']))
@@ -301,32 +301,65 @@ class TreeVAE(nn.Module):
 
             # if there is a router (i.e. decision probability) then we are in the internal nodes (not leaves)
             if node.router is not None:
-                # compute the probability of the sample to go to the left child
-                prob_child_left = node.router(z_sample).squeeze()
-                prob_child_left_q = node.routers_q(d).squeeze()
+                if self.n_ary == 2:
+                    # compute the probability of the sample to go to the left child
+                    prob_child_left = node.router(z_sample).squeeze()
+                    prob_child_left_q = node.routers_q(d).squeeze()
 
-                # compute the KL of the decisions
-                kl_decisions = prob_child_left_q * (epsilon + prob_child_left_q / (prob_child_left + epsilon)).log() + \
-                                (1 - prob_child_left_q) * (epsilon + (1 - prob_child_left_q) / (1 - prob_child_left + epsilon)).log()
-                kl_decisions = prob * kl_decisions
-                kl_decisions_tot += kl_decisions
+                    # compute the KL of the decisions
+                    kl_decisions = prob_child_left_q * (epsilon + prob_child_left_q / (prob_child_left + epsilon)).log() + \
+                                    (1 - prob_child_left_q) * (epsilon + (1 - prob_child_left_q) / (1 - prob_child_left + epsilon)).log()
+                    kl_decisions = prob * kl_decisions
+                    kl_decisions_tot += kl_decisions
 
-                # compute the contrastive loss of the embeddings and the decisions
-                if self.training is True and self.augment is True and 'simple' not in self.augmentation_method:
-                    if depth_level == 0:
-                        # compute the contrastive loss for all the bottom-up representations
-                        aug_decisions_loss += calc_aug_loss(prob_parent=prob, prob_router=prob_child_left_q, augmentation_methods=self.augmentation_method, emb_contr=emb_contr)
-                    else:
-                        # compute the contrastive loss for the decisions
-                        aug_decisions_loss += calc_aug_loss(prob_parent=prob, prob_router=prob_child_left_q, augmentation_methods=self.augmentation_method, emb_contr=[])
+                    # compute the contrastive loss of the embeddings and the decisions
+                    if self.training is True and self.augment is True and 'simple' not in self.augmentation_method:
+                        if depth_level == 0:
+                            # compute the contrastive loss for all the bottom-up representations
+                            aug_decisions_loss += calc_aug_loss(prob_parent=prob, prob_router=prob_child_left_q, augmentation_methods=self.augmentation_method, emb_contr=emb_contr)
+                        else:
+                            # compute the contrastive loss for the decisions
+                            aug_decisions_loss += calc_aug_loss(prob_parent=prob, prob_router=prob_child_left_q, augmentation_methods=self.augmentation_method, emb_contr=[])
 
-                # we are not in a leaf, so we have to add the left and right child to the list
-                prob_node_left, prob_node_right = prob * prob_child_left_q, prob * (1 - prob_child_left_q)
-                node_left, node_right = node.left, node.right
-                list_nodes.append(
-                    {'node': node_left, 'depth': depth_level + 1, 'prob': prob_node_left, 'z_parent_sample': z_sample})
-                list_nodes.append({'node': node_right, 'depth': depth_level + 1, 'prob': prob_node_right,
-                                'z_parent_sample': z_sample})
+                    # we are not in a leaf, so we have to add the left and right child to the list
+                    prob_node_left, prob_node_right = prob * prob_child_left_q, prob * (1 - prob_child_left_q)
+                    node_left, node_right = node.left, node.right
+                    list_nodes.append(
+                        {'node': node_left, 'depth': depth_level + 1, 'prob': prob_node_left, 'z_parent_sample': z_sample})
+                    list_nodes.append({'node': node_right, 'depth': depth_level + 1, 'prob': prob_node_right,
+                                    'z_parent_sample': z_sample})
+                elif self.n_ary > 2:
+                    # pruning까지 고려하긴 했는데, 검증 필요
+                    prob_child = node.router(z_sample)
+                    prob_child_q = node.routers_q(d)
+
+                    active_indices = node.active_child_indices()
+                    children = node.active_children()
+
+                    prob_child = prob_child[:, active_indices]
+                    prob_child_q = prob_child_q[:, active_indices]
+
+                    prob_child = prob_child / (prob_child.sum(dim=1, keepdim=True) + epsilon)
+                    prob_child_q = prob_child_q / (prob_child_q.sum(dim=1, keepdim=True) + epsilon)
+
+                    kl_decisions = prob_child_q * (
+                        (prob_child_q + epsilon).log() - (prob_child + epsilon).log()
+                    )
+
+                    kl_decisions = prob * kl_decisions.sum(dim = 1)
+                    kl_decisions_tot += kl_decisions
+
+                    # if self.training is True and self.augment is True and 'simple' not in self.augmentation_method:
+                    #     if depth_level == 0:
+                    #         aug_decisions_loss += calc_aug_loss(prob_parent=prob, prob_router=prob_child_left_q, augmentation_methods=self.augmentation_method, emb_contr=emb_contr)
+                    #     else:
+                    #         aug_decisions_loss += calc_aug_loss(prob_parent=prob, prob_router=prob_child_left_q, augmentation_methods=self.augmentation_method, emb_contr=[])
+
+                    prob_nodes = prob.unsqueeze(1) * prob_child_q
+                    for idx, child_node in enumerate(children):
+                        list_nodes.append({
+                            'node': child_node, 'depth': depth_level + 1, 'prob': prob_nodes[:, idx], 'z_parent_sample': z_sample
+                        })
 
             # if there is a decoder then we are in one of the leaf
             elif node.decoder is not None:
@@ -339,10 +372,19 @@ class TreeVAE(nn.Module):
 
             # here we are in an internal node with pruned leaves and thus only have one child
             elif node.router is None and node.decoder is None:
-                node_left, node_right = node.left, node.right
-                child = node_left if node_left is not None else node_right
-                list_nodes.append(
-                    {'node': child, 'depth': depth_level + 1, 'prob': prob, 'z_parent_sample': z_sample})
+                if self.n_ary == 2:
+                    node_left, node_right = node.left, node.right
+                    child = node_left if node_left is not None else node_right
+                    list_nodes.append(
+                        {'node': child, 'depth': depth_level + 1, 'prob': prob, 'z_parent_sample': z_sample})
+                
+                elif self.n_ary > 2:
+                    # 다중 노드라면 다 자르고 나서 child 노드로 하나 남았을 때, 
+                    node_child = node.single_child()
+
+                    list_nodes.append({
+                        'node': node_child, 'depth': depth_level + 1, 'prob': prob, 'z_parent_sample': z_sample
+                    })
 
         kl_nodes_loss = torch.clamp(torch.mean(kl_nodes_tot), min=-10, max=1e10)
         kl_decisions_loss = torch.mean(kl_decisions_tot)
@@ -393,18 +435,31 @@ class TreeVAE(nn.Module):
         while len(list_nodes) != 0:
             current_node = list_nodes.pop(0)
             node, depth_level = current_node['node'], current_node['depth']
-            if node.router is not None:
-                node_left, node_right = node.left, node.right
-                list_nodes.append(
-                    {'node': node_left, 'depth': depth_level + 1})
-                list_nodes.append({'node': node_right, 'depth': depth_level + 1})
-            elif node.router is None and node.decoder is None:
-                # we are in an internal node with pruned leaves and thus only have one child
-                node_left, node_right = node.left, node.right
-                child = node_left if node_left is not None else node_right
-                list_nodes.append({'node': child, 'depth': depth_level + 1})                
-            else:
-                nodes_leaves.append(current_node)
+
+            if self.n_ary == 2:
+                if node.router is not None:
+                    node_left, node_right = node.left, node.right
+                    list_nodes.append(
+                        {'node': node_left, 'depth': depth_level + 1})
+                    list_nodes.append({'node': node_right, 'depth': depth_level + 1})
+                elif node.router is None and node.decoder is None:
+                    # we are in an internal node with pruned leaves and thus only have one child
+                    node_left, node_right = node.left, node.right
+                    child = node_left if node_left is not None else node_right
+                    list_nodes.append({'node': child, 'depth': depth_level + 1})                
+                else:
+                    nodes_leaves.append(current_node)
+            elif self.n_ary > 2:
+                if node.router is not None:
+                    child_nodes = node.active_children()
+                    for child_node in child_nodes:
+                        list_nodes.append({'node': child_node, 'depth': depth_level + 1})
+                elif node.router is None and node.decoder is None:
+                    child_node = node.single_child()
+                    list_nodes.append({'node': child_node, 'depth': depth_level+1})
+                else:
+                    nodes_leaves.append(current_node)
+                    
         return nodes_leaves
 
 
@@ -436,11 +491,18 @@ class TreeVAE(nn.Module):
         small_model: models.model_smalltree.SmallTreeVAE
             The sub-tree with one root and two leaves that needs to be attached to TreeVAE.
         """
-        assert node.left is None and node.right is None
+        ## 여기서 부터
+        if self.n_ary == 2:
+            assert node.left is None and node.right is None
+        elif self.n_ary > 2:
+            assert all(child is None for child in node.children)
+
         node.router = small_model.decision
         node.routers_q = small_model.decision_q
         node.decoder = None
-        for j in range(2):
+
+        for j in range(self.n_ary):
+            # range self.n_ary로 돌려면, SmallTree도 수정이 필요함 -> 수정 예정
             dense = small_model.denses[j]
             transformation = small_model.transformations[j]
             decoder = small_model.decoders[j]
@@ -523,16 +585,32 @@ class TreeVAE(nn.Module):
             # if we are in the internal nodes (not leaves)
             if node.router is not None:
 
-                prob_child_left_q = node.routers_q(d).squeeze()
+                if self.n_ary == 2:
+                    prob_child_left_q = node.routers_q(d).squeeze()
 
-                # we are not in a leaf, so we have to add the left and right child to the list
-                prob_node_left, prob_node_right = prob * prob_child_left_q, prob * (1 - prob_child_left_q)
+                    # we are not in a leaf, so we have to add the left and right child to the list
+                    prob_node_left, prob_node_right = prob * prob_child_left_q, prob * (1 - prob_child_left_q)
 
-                node_left, node_right = node.left, node.right
-                list_nodes.append(
-                    {'node': node_left, 'depth': depth_level + 1, 'prob': prob_node_left, 'z_parent_sample': z_sample})
-                list_nodes.append({'node': node_right, 'depth': depth_level + 1, 'prob': prob_node_right,
-                                'z_parent_sample': z_sample})
+                    node_left, node_right = node.left, node.right
+                    list_nodes.append(
+                        {'node': node_left, 'depth': depth_level + 1, 'prob': prob_node_left, 'z_parent_sample': z_sample})
+                    list_nodes.append({'node': node_right, 'depth': depth_level + 1, 'prob': prob_node_right,
+                                    'z_parent_sample': z_sample})
+                elif self.n_ary > 2:
+                    prob_child_q = node.routers_q(d)
+
+                    active_indices = node.active_child_indices()
+                    children = node.active_children()
+
+                    prob_child_q = prob_child_q[:, active_indices]
+
+                    prob_child_q = prob_child_q / (prob_child_q.sum(dim=1, keepdim=True) + epsilon)
+
+                    prob_nodes = prob.unsqueeze(1) * prob_child_q
+                    for idx, child_node in enumerate(children):
+                        list_nodes.append({
+                            'node': child_node, 'depth': depth_level + 1, 'prob': prob_nodes[:, idx], 'z_parent_sample': z_sample
+                        })
 
             elif node.decoder is not None:
                 # if we are in a leaf we need to store the prob of reaching that leaf and compute reconstructions
@@ -544,10 +622,19 @@ class TreeVAE(nn.Module):
 
             elif node.router is None and node.decoder is None:
                 # We are in an internal node with pruned leaves and thus only have one child
-                node_left, node_right = node.left, node.right
-                child = node_left if node_left is not None else node_right
-                list_nodes.append(
-                    {'node': child, 'depth': depth_level + 1, 'prob': prob, 'z_parent_sample': z_sample})
+                if self.n_ary == 2:
+                    node_left, node_right = node.left, node.right
+                    child = node_left if node_left is not None else node_right
+                    list_nodes.append(
+                        {'node': child, 'depth': depth_level + 1, 'prob': prob, 'z_parent_sample': z_sample})
+                
+                elif self.n_ary > 2:
+                    # 다중 노드라면 다 자르고 나서 child 노드로 하나 남았을 때, 
+                    node_child = node.single_child()
+
+                    list_nodes.append({
+                        'node': node_child, 'depth': depth_level + 1, 'prob': prob, 'z_parent_sample': z_sample
+                    })
 
         return reconstructions, node_leaves
 
@@ -593,14 +680,30 @@ class TreeVAE(nn.Module):
                 z_sample = z_p.rsample()
 
             if node.router is not None:
-                prob_child_left = node.router(z_sample).squeeze()
-                prob_node_left, prob_node_right = prob * prob_child_left, prob * (
-                        1 - prob_child_left)
-                node_left, node_right = node.left, node.right
-                list_nodes.append(
-                    {'node': node_left, 'depth': depth_level + 1, 'prob': prob_node_left, 'z_parent_sample': z_sample})
-                list_nodes.append({'node': node_right, 'depth': depth_level + 1, 'prob': prob_node_right,
-                                'z_parent_sample': z_sample})
+                if self.n_ary == 2:
+                    prob_child_left = node.router(z_sample).squeeze()
+                    prob_node_left, prob_node_right = prob * prob_child_left, prob * (
+                            1 - prob_child_left)
+                    node_left, node_right = node.left, node.right
+                    list_nodes.append(
+                        {'node': node_left, 'depth': depth_level + 1, 'prob': prob_node_left, 'z_parent_sample': z_sample})
+                    list_nodes.append({'node': node_right, 'depth': depth_level + 1, 'prob': prob_node_right,
+                                    'z_parent_sample': z_sample})
+                elif self.n_ary > 2:
+                    prob_child = node.router(z_sample)
+
+                    active_indices = node.active_child_indices()
+                    children = node.active_children()
+
+                    prob_child = prob_child[:, active_indices]
+
+                    prob_child = prob_child / (prob_child.sum(dim=1, keepdim=True) + epsilon)
+
+                    prob_nodes = prob.unsqueeze(1) * prob_child
+                    for idx, child_node in enumerate(children):
+                        list_nodes.append({
+                            'node': child_node, 'depth': depth_level + 1, 'prob': prob_nodes[:, idx], 'z_parent_sample': z_sample
+                        })
 
             elif node.decoder is not None:
                 # here we are in a leaf node and we attach the corresponding generations
@@ -610,10 +713,18 @@ class TreeVAE(nn.Module):
 
             elif node.router is None and node.decoder is None:
                 # We are in an internal node with pruned leaves and thus only have one child
-                node_left, node_right = node.left, node.right
-                child = node_left if node_left is not None else node_right
-                list_nodes.append(
-                    {'node': child, 'depth': depth_level + 1, 'prob': prob, 'z_parent_sample': z_sample})
+                if self.n_ary == 2:
+                    node_left, node_right = node.left, node.right
+                    child = node_left if node_left is not None else node_right
+                    list_nodes.append(
+                        {'node': child, 'depth': depth_level + 1, 'prob': prob, 'z_parent_sample': z_sample})
+                elif self.n_ary > 2:
+                    # 다중 노드라면 다 자르고 나서 child 노드로 하나 남았을 때, 
+                    node_child = node.single_child()
+
+                    list_nodes.append({
+                        'node': node_child, 'depth': depth_level + 1, 'prob': prob, 'z_parent_sample': z_sample
+                    })
         p_c_z = torch.cat([prob.unsqueeze(-1) for prob in leaves_prob], dim=-1)
         
         return reconstructions, p_c_z

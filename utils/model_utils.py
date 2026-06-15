@@ -28,6 +28,7 @@ def construct_tree(transformations, routers, routers_q, denses, decoders, n_ary=
 		raise ValueError('Len transformation is different than len routers in constructing the tree.')
 	root = Node(transformation=transformations[0], router=routers[0], routers_q=routers_q[0], dense=denses[0], decoder=decoders[0], n_ary=n_ary)
 	for i in range(1, len(transformations)):
+		# 0은 root임 root의 child를 insert하는 과정이라 보면 됨.
 		root.insert(transformation=transformations[i], router=routers[i], routers_q=routers_q[i], dense=denses[i], decoder=decoders[i])
 	return root
 
@@ -55,6 +56,7 @@ class Node:
 		return [child for child in self.child_slots() if child is not None]
 
 	def active_child_indices(self):
+		# None이 아닌 child의 index만 담은 list를 return
 		return [idx for idx, child in enumerate(self.child_slots()) if child is not None]
 
 	def single_child(self):
@@ -119,12 +121,52 @@ class Node:
 				raise ValueError("This is not my child! (Node is not a child of this parent.)")
 		elif self.n_ary >= 3:
 			for idx, node_child in enumerate(self.children):
-				if child is node_child:
+				if child is node_child: # prune하려는 child node를 찾았다면
 					self.children[idx] = None
 					child.parent = None
-					if len(self.active_children()) <= 1:
+
+					# 활성화 되어있는 child의 indices 받아오기
+					active_child_indices = self.active_child_indices()
+					if len(active_child_indices) <= 1:
+						# Pruning했을 때, child node가 하나 남아있다면, 더 이상 child 쪽 branch가 뻗어있어야 할 
+						# 이유가 없기 때문에 router 자체를 제거해버린다.
 						self.router = None
 						self.routers_q = None
+					else:
+						import types
+						import torch
+
+						def mask_pruned_child_probabilities(router):
+							if router is None:
+								return
+							if not hasattr(router, "_treevae_base_forward"):
+								router._treevae_base_forward = router.forward
+
+							router._treevae_active_child_indices = active_child_indices
+
+							def masked_forward(router_self, inputs, *args, **kwargs):
+								# 기존 router의 forward method를 사용한다. 
+								output = router_self._treevae_base_forward(inputs, *args, **kwargs)
+								if isinstance(output, tuple):
+									probabilities, *extra_outputs = output
+								else:
+									probabilities, extra_outputs = output, None
+
+								# Probability normalization
+								active_indices = router_self._treevae_active_child_indices
+								masked_probabilities = torch.zeros_like(probabilities)
+								active_probabilities = probabilities[:, active_indices]
+								normalizer = active_probabilities.sum(dim=1, keepdim=True).clamp_min(1e-7)
+								masked_probabilities[:, active_indices] = active_probabilities / normalizer
+
+								if extra_outputs is not None:
+									return (masked_probabilities, *extra_outputs)
+								return masked_probabilities
+
+							router.forward = types.MethodType(masked_forward, router)
+
+						mask_pruned_child_probabilities(self.router)
+						mask_pruned_child_probabilities(self.routers_q)
 					return
 			raise ValueError("This is not my child! (Node is not a child of this parent.)")
 

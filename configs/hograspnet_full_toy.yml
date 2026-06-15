@@ -9,7 +9,7 @@ data:
   num_clusters_data: 28 # number of classes
 
 training:
-  n_ary: 2
+  n_ary: 3
   num_epochs: 150
   num_epochs_smalltree: 150
   num_epochs_intermediate_fulltrain: 0

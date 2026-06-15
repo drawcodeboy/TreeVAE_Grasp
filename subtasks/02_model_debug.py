@@ -19,3 +19,16 @@ a = torch.randn(4, 128)
 
 print(model(a).shape)
 '''
+
+from models.model import TreeVAE
+from utils.utils import prepare_config
+import yaml
+
+configs = prepare_config()
+
+model = TreeVAE(**configs['training'])
+
+x = torch.randn((16, 3, 4096))
+return_dict = model(x)
+
+print(return_dict)
