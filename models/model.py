@@ -201,7 +201,7 @@ class TreeVAE(nn.Module):
 
         # construct the tree
         self.tree = construct_tree(transformations=self.transformations, routers=self.decisions,
-                                        routers_q=self.decisions_q, denses=self.denses, decoders=self.decoders)
+                                        routers_q=self.decisions_q, denses=self.denses, decoders=self.decoders, n_ary=self.n_ary)
 
     def forward(self, x):
         """

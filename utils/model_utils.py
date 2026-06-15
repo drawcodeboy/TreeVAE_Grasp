@@ -12,7 +12,7 @@ def compute_posterior(mu_q, mu_p, sigma_q, sigma_p):
 	return z_mu_q, z_sigma_q
 
 
-def construct_tree(transformations, routers, routers_q, denses, decoders):
+def construct_tree(transformations, routers, routers_q, denses, decoders, n_ary=2):
 	"""
 		Construct the tree by passing a list of transformations and routers from root to leaves visiting nodes
 		layer-wise from left to right
@@ -26,14 +26,14 @@ def construct_tree(transformations, routers, routers_q, denses, decoders):
 	if len(transformations) != len(routers) and len(transformations) != len(denses) \
 			and len(transformations) != len(decoders):
 		raise ValueError('Len transformation is different than len routers in constructing the tree.')
-	root = Node(transformation=transformations[0], router=routers[0], routers_q=routers_q[0], dense=denses[0], decoder=decoders[0])
+	root = Node(transformation=transformations[0], router=routers[0], routers_q=routers_q[0], dense=denses[0], decoder=decoders[0], n_ary=n_ary)
 	for i in range(1, len(transformations)):
 		root.insert(transformation=transformations[i], router=routers[i], routers_q=routers_q[i], dense=denses[i], decoder=decoders[i])
 	return root
 
 
 class Node:
-	def __init__(self, transformation, router, routers_q, dense, decoder=None, expand=True):
+	def __init__(self, transformation, router, routers_q, dense, decoder=None, expand=True, n_ary=2):
 		self.left = None
 		self.right = None
 		self.parent = None
@@ -43,38 +43,89 @@ class Node:
 		self.routers_q = routers_q
 		self.decoder = decoder
 		self.expand = expand
+		self.n_ary = n_ary # Added by Dawoon Kwon
+		self.children = [None for _ in range(n_ary)] # Added by Dawoon Kwon
+
+	def child_slots(self):
+		if self.n_ary == 2:
+			return [self.left, self.right]
+		return self.children
+
+	def active_children(self):
+		return [child for child in self.child_slots() if child is not None]
+
+	def active_child_indices(self):
+		return [idx for idx, child in enumerate(self.child_slots()) if child is not None]
+
+	def single_child(self):
+		active_children = self.active_children()
+		if len(active_children) != 1:
+			raise ValueError("Expected exactly one active child.")
+		return active_children[0]
+
+	def has_children(self):
+		return any(child is not None for child in self.child_slots())
 
 	def insert(self, transformation=None, router=None, routers_q=None, dense=None, decoder=None):
+		'''
+		이 함수는 기존 트리에 노드를 하나 삽입하는 역할을 수행한다.
+		left 노드가 없으면, left 노드를 하나 삽입하고 함수를 종료
+		left 노드가 있으면, right 노드를 하나 삽입하고 함수를 종료
+		left, right 노드가 둘 다 있으면, left 노드의 child 노드를 탐색하여 어떻게든 하나의 노드를 삽입하고 함수를 종료
+
+		'''
 		queue = []
 		node = self
 		queue.append(node)
 		while len(queue) > 0:
 			node = queue.pop(0)
-			if node.expand:
+			if node.expand and node.n_ary == 2:
 				if node.left is None:
-					node.left = Node(transformation, router, routers_q, dense, decoder)
+					node.left = Node(transformation, router, routers_q, dense, decoder, n_ary=node.n_ary)
 					node.left.parent = node
 					return
 				elif node.right is None:
-					node.right = Node(transformation, router, routers_q, dense, decoder)
+					node.right = Node(transformation, router, routers_q, dense, decoder, n_ary=node.n_ary)
 					node.right.parent = node
 					return
 				else:
 					queue.append(node.left)
 					queue.append(node.right)
+			elif node.expand and node.n_ary >= 3:
+				for idx in range(len(node.children)):
+					if node.children[idx] is None:
+						node.children[idx] = Node(transformation, router, routers_q, dense, decoder, n_ary=node.n_ary)
+						node.children[idx].parent = node
+						return
+				for idx in range(len(node.children)):
+					queue.append(node.children[idx])
+
 		print('\nAttention node has not been inserted!\n')
 		return
 
 	def prune_child(self, child):
-		if child is self.left:
-			self.left = None
-			self.router = None
-
-		elif child is self.right:
-			self.right = None
-			self.router = None
-
-		else:
+		if self.n_ary == 2:
+			if child is self.left:
+				self.left = None
+				self.router = None
+				self.routers_q = None
+				child.parent = None
+			elif child is self.right:
+				self.right = None
+				self.router = None
+				self.routers_q = None
+				child.parent = None
+			else:
+				raise ValueError("This is not my child! (Node is not a child of this parent.)")
+		elif self.n_ary >= 3:
+			for idx, node_child in enumerate(self.children):
+				if child is node_child:
+					self.children[idx] = None
+					child.parent = None
+					if len(self.active_children()) <= 1:
+						self.router = None
+						self.routers_q = None
+					return
 			raise ValueError("This is not my child! (Node is not a child of this parent.)")
 
 def return_list_tree(root):
@@ -92,14 +143,10 @@ def return_list_tree(root):
 		routers_q.append(current_node.routers_q)
 		decoders.append(current_node.decoder)
 		if current_node.router is not None:
-			node_left, node_right = current_node.left, current_node.right
-			list_nodes.append(node_left)
-			list_nodes.append(node_right)
+			list_nodes.extend(current_node.active_children())
 		elif current_node.router is None and current_node.decoder is None:
 			# We are in an internal node with pruned leaves and thus only have one child
-			node_left, node_right = current_node.left, current_node.right
-			child = node_left if node_left is not None else node_right
-			list_nodes.append(child)
+			list_nodes.append(current_node.single_child())
 	return nn.ModuleList(transformations), nn.ModuleList(routers), nn.ModuleList(denses), nn.ModuleList(decoders), nn.ModuleList(routers_q)
 
 
