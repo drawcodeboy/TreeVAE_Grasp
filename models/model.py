@@ -9,7 +9,7 @@ from models.networks import get_encoder, get_decoder, MLP, Router, Dense
 from models.networks_pc import get_encoder_pc, get_decoder_pc
 from models.losses import loss_reconstruction_binary, loss_reconstruction_mse
 from utils.model_utils import return_list_tree
-from utils.training_utils import calc_aug_loss
+from utils.training_utils import calc_aug_loss, calc_aug_loss_for_cat
 
 class TreeVAE(nn.Module):
     """
@@ -394,11 +394,11 @@ class TreeVAE(nn.Module):
                     kl_decisions = prob * kl_decisions.sum(dim = 1)
                     kl_decisions_tot += kl_decisions
 
-                    # if self.training is True and self.augment is True and 'simple' not in self.augmentation_method:
-                    #     if depth_level == 0:
-                    #         aug_decisions_loss += calc_aug_loss(prob_parent=prob, prob_router=prob_child_left_q, augmentation_methods=self.augmentation_method, emb_contr=emb_contr)
-                    #     else:
-                    #         aug_decisions_loss += calc_aug_loss(prob_parent=prob, prob_router=prob_child_left_q, augmentation_methods=self.augmentation_method, emb_contr=[])
+                    if self.training is True and self.augment is True and 'simple' not in self.augmentation_method:
+                        if depth_level == 0:
+                            aug_decisions_loss += calc_aug_loss_for_cat(prob_parent=prob, prob_router=prob_child_q, augmentation_methods=self.augmentation_method, emb_contr=emb_contr)
+                        else:
+                            aug_decisions_loss += calc_aug_loss_for_cat(prob_parent=prob, prob_router=prob_child_q, augmentation_methods=self.augmentation_method, emb_contr=[])
 
                     prob_nodes = prob.unsqueeze(1) * prob_child_q
                     for idx, child_node in enumerate(children):

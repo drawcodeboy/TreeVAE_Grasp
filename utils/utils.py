@@ -134,7 +134,7 @@ def count_values_in_sequence(seq):
 	return dict(res)
 
 
-def dendrogram_purity(tree_root, ground_truth, ind_samples_of_leaves):
+def dendrogram_purity(tree_root, ground_truth, ind_samples_of_leaves, n_ary=2):
 	total_per_label_frequencies = count_values_in_sequence(ground_truth)
 	total_per_label_pairs_count = {k: comb(v, 2, True) for k, v in total_per_label_frequencies.items()}
 	total_n_of_pairs = sum(total_per_label_pairs_count.values())
@@ -156,23 +156,45 @@ def dendrogram_purity(tree_root, ground_truth, ind_samples_of_leaves):
 		
 		elif node.router is None and node.decoder is None:
 			# We are in an internal node with pruned leaves and thus only have one child. Therefore no prunity calculation here!
-			node_left, node_right = node.left, node.right
-			child = node_left if node_left is not None else node_right
+			if n_ary == 2:
+				node_left, node_right = node.left, node.right
+				child = node_left if node_left is not None else node_right
+			else:
+				child = node.single_child()
 			node_per_label_frequencies, node_total_dp_count = calculate_purity(child, level + 1)	
 			return node_per_label_frequencies, node_total_dp_count
 		
 		else:  
 			# it is an inner splitting node
-			left_child_per_label_freq, left_child_total_dp_count = calculate_purity(node.left, level + 1)
-			right_child_per_label_freq, right_child_total_dp_count = calculate_purity(node.right, level + 1)
-			node_total_dp_count = left_child_total_dp_count + right_child_total_dp_count
-			# Count how many samples of given internal node fall into which ground-truth class (=sum of their children's values)
-			node_per_label_frequencies = {k: left_child_per_label_freq.get(k, 0) + right_child_per_label_freq.get(k, 0) \
-										for k in set(left_child_per_label_freq) | set(right_child_per_label_freq)}
-			
-			# Class-wisedly count how many pairs of samples of a class will have this node as least common ancestor (=mult. of their children's values, bcs this is all possible pairs coming from different sides)
-			node_per_label_pairs_count = {k: left_child_per_label_freq.get(k) * right_child_per_label_freq.get(k) \
-										for k in set(left_child_per_label_freq) & set(right_child_per_label_freq)}
+			if n_ary == 2:
+				left_child_per_label_freq, left_child_total_dp_count = calculate_purity(node.left, level + 1)
+				right_child_per_label_freq, right_child_total_dp_count = calculate_purity(node.right, level + 1)
+				node_total_dp_count = left_child_total_dp_count + right_child_total_dp_count
+				# Count how many samples of given internal node fall into which ground-truth class (=sum of their children's values)
+				node_per_label_frequencies = {k: left_child_per_label_freq.get(k, 0) + right_child_per_label_freq.get(k, 0) \
+											for k in set(left_child_per_label_freq) | set(right_child_per_label_freq)}
+				
+				# Class-wisedly count how many pairs of samples of a class will have this node as least common ancestor (=mult. of their children's values, bcs this is all possible pairs coming from different sides)
+				node_per_label_pairs_count = {k: left_child_per_label_freq.get(k) * right_child_per_label_freq.get(k) \
+											for k in set(left_child_per_label_freq) & set(right_child_per_label_freq)}
+			else:
+				child_results = [calculate_purity(child, level + 1) for child in node.active_children()]
+				child_per_label_freqs = [child_per_label_freq for child_per_label_freq, _ in child_results]
+				node_total_dp_count = sum(child_total_dp_count for _, child_total_dp_count in child_results)
+
+				# Count how many samples of given internal node fall into which ground-truth class (=sum of their children's values)
+				node_per_label_frequencies = {}
+				for child_per_label_freq in child_per_label_freqs:
+					for label, label_freq in child_per_label_freq.items():
+						node_per_label_frequencies[label] = node_per_label_frequencies.get(label, 0) + label_freq
+				
+				# For n-ary splits, pairs whose LCA is this node can come from any pair of distinct children.
+				node_per_label_pairs_count = {}
+				for i in range(len(child_per_label_freqs)):
+					for j in range(i + 1, len(child_per_label_freqs)):
+						for label in set(child_per_label_freqs[i]) & set(child_per_label_freqs[j]):
+							node_per_label_pairs_count[label] = node_per_label_pairs_count.get(label, 0) + \
+								child_per_label_freqs[i][label] * child_per_label_freqs[j][label]
 
 		# Given the class-wise number of pairs with given node as least common ancestor node, calculate their purity
 		for label, pair_count in node_per_label_pairs_count.items():
@@ -185,7 +207,7 @@ def dendrogram_purity(tree_root, ground_truth, ind_samples_of_leaves):
 	return purity
 
 
-def leaf_purity(tree_root, ground_truth, ind_samples_of_leaves):
+def leaf_purity(tree_root, ground_truth, ind_samples_of_leaves, n_ary=2):
 	values = [] # purity rate per leaf
 	weights = [] # n_samples per leaf
 	# For each leaf calculate the maximum over classes for in-leaf purity (i.e. majority class / n_samples_in_leaf)
@@ -206,12 +228,19 @@ def leaf_purity(tree_root, ground_truth, ind_samples_of_leaves):
 			weights.append(node_total_dp_count)
 		elif node.router is None and node.decoder is None:
 			# We are in an internal node with pruned leaves and thus only have one child.
-			node_left, node_right = node.left, node.right
-			child = node_left if node_left is not None else node_right
+			if n_ary == 2:
+				node_left, node_right = node.left, node.right
+				child = node_left if node_left is not None else node_right
+			else:
+				child = node.single_child()
 			get_leaf_purities(child)	
 		else:
-			get_leaf_purities(node.left)
-			get_leaf_purities(node.right)
+			if n_ary == 2:
+				get_leaf_purities(node.left)
+				get_leaf_purities(node.right)
+			else:
+				for child in node.active_children():
+					get_leaf_purities(child)
 
 	get_leaf_purities(tree_root)
 	assert len(values) == len(ind_samples_of_leaves), "Didn't iterate through all leaves"

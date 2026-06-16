@@ -333,6 +333,11 @@ def get_data(configs):
 									   test_ratio=configs['data']['test_ratio'],
 									   split_trials=configs['data']['split_trials'],
 									   transform=transform_eval)
+		
+		# Debug 용 Subset을 써서 전체 동작을 확인하기 위해 데이터 수를 줄임
+		trainset = torch.utils.data.Subset(trainset, range(500))
+		trainset_eval = torch.utils.data.Subset(trainset_eval, range(500))
+		testset = torch.utils.data.Subset(testset, range(500))
 
 	else:
 		raise NotImplementedError('This dataset is not supported!')

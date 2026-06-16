@@ -152,21 +152,34 @@ def get_node_embeddings(model, x):
         node_info_list.append(node_info)
 
         if node.router is not None:
-            prob_child_left_q = node.routers_q(d).squeeze()
+            if model.n_ary == 2:
+                prob_child_left_q = node.routers_q(d).squeeze()
 
-            # We are not in a leaf, so we have to add the left and right child to the list
-            prob_node_left, prob_node_right = prob * prob_child_left_q, prob * (1 - prob_child_left_q)
+                # We are not in a leaf, so we have to add the left and right child to the list
+                prob_node_left, prob_node_right = prob * prob_child_left_q, prob * (1 - prob_child_left_q)
 
-            node_left, node_right = node.left, node.right
-            list_nodes.append(
-                {'node': node_left, 'depth': depth_level + 1, 'prob': prob_node_left, 'z_parent_sample': z_sample})
-            list_nodes.append({'node': node_right, 'depth': depth_level + 1, 'prob': prob_node_right,
-                               'z_parent_sample': z_sample})
+                node_left, node_right = node.left, node.right
+                list_nodes.append(
+                    {'node': node_left, 'depth': depth_level + 1, 'prob': prob_node_left, 'z_parent_sample': z_sample})
+                list_nodes.append({'node': node_right, 'depth': depth_level + 1, 'prob': prob_node_right,
+                                'z_parent_sample': z_sample})
+            else:
+                prob_child_q = node.routers_q(d)
+                active_indices = node.active_child_indices()
+                children = node.active_children()
 
-        elif node.decoder is None and (node.left is not None or node.right is not None):
+                prob_child_q = prob_child_q[:, active_indices]
+                prob_child_q = prob_child_q / (prob_child_q.sum(dim=1, keepdim=True) + epsilon)
+
+                prob_nodes = prob.unsqueeze(1) * prob_child_q
+                for idx, child in enumerate(children):
+                    list_nodes.append({
+                        'node': child, 'depth': depth_level + 1, 'prob': prob_nodes[:, idx], 'z_parent_sample': z_sample
+                    })
+
+        elif node.decoder is None and node.has_children():
             # We are in an internal node with pruned leaves and thus only have one child
-            node_left, node_right = node.left, node.right
-            child = node_left if node_left is not None else node_right
+            child = node.single_child()
             list_nodes.append(
                 {'node': child, 'depth': depth_level + 1, 'prob': prob, 'z_parent_sample': z_sample})
 
@@ -200,28 +213,6 @@ def draw_scatter_node(node_id, node_embeddings, colors, ax, pca = True):
     ax.set_yticks([])
 
 
-def splits_to_right_and_left(node_id, data):
-    # Initialize splits to right and left to 0
-    splits_to_right = 0
-    splits_to_left = 0
-    
-    # root node
-
-    while True:
-        # root node
-        if node_id == 0:
-            return splits_to_left, splits_to_right
-
-        # previous node has same parent
-        elif data[node_id-1][2] == data[node_id][2]:
-            splits_to_right += 1
-            node_id = data[node_id][2]
-
-        else:
-            splits_to_left += 1
-            node_id = data[node_id][2]
-
-
 def get_depth(node_id, data):
     # Initialize the depth to 0
     depth = 0
@@ -234,6 +225,13 @@ def get_depth(node_id, data):
         depth = 1 + get_depth(node[2], data)
     
     return depth
+
+
+def get_scatter_axes_position(node_id, pos, node_width=0.1, node_height=0.1):
+    x, y = pos[node_id]
+    x = np.clip(x - node_width / 2, 0, 1 - node_width)
+    y = np.clip(y + 0.9, 0, 1 - node_height)
+    return x, y, node_width, node_height
 
 
 # Create the tree graph with scatter plots as nodes
@@ -257,36 +255,22 @@ def draw_tree_with_scatter_plots(data, node_embeddings, label_list, pca = True):
 
 
     fig, ax = plt.subplots(figsize=(20, 10))
-
-    for node_id, node_data in G.nodes(data=True):
-        x, y = pos[node_id]
-
-        # Create a subplot for each node, centered on the node
-        sub_ax = fig.add_axes([x, y+0.9, 0.1, 0.1])
-        draw_scatter_node(node_id, node_embeddings, label_list, sub_ax, pca)
-
-    # Draw the lines between above nodes, need to consider the position of the subplots
-
-    # first need a list of edges in the order of the nodes and the positions of the nodes
-    # Calculate the positions of the connection lines
-    # offset by -0.05 for each left split and by +0.05 for each right split
-
     node_positions = {}
 
+    for node_id, node_data in G.nodes(data=True):
+        # Create a subplot for each node, centered on the node
+        x, y, width, height = get_scatter_axes_position(node_id, pos)
+        sub_ax = fig.add_axes([x, y, width, height])
+        draw_scatter_node(node_id, node_embeddings, label_list, sub_ax, pca)
+        node_positions[node_id] = (x + width / 2, y + height / 2)
+
+    # Draw the lines between above nodes.
     for node in data:
         node_id, label, parent_id, node_type = node
-        x, y = pos[node_id] 
-        depth = get_depth(node_id, data)
-        splits_to_left, splits_to_right = splits_to_right_and_left(node_id, data)
-
-        # calculate the position of the node
-        x = x - splits_to_left * 0.05 + splits_to_right * 0.05 + 0.05
-        y = y + 1.1 - depth * 0.05
-
-        node_positions[node_id] = (x, y)
 
         # draw the connection lines
         if parent_id is not None:
+            x, y = node_positions[node_id]
             x_parent, y_parent = node_positions[parent_id]
             ax.plot([x_parent, x], [y_parent, y], color='black', alpha=0.5)
 
@@ -297,5 +281,4 @@ def draw_tree_with_scatter_plots(data, node_embeddings, label_list, pca = True):
     ax.axis('off')
 
     plt.show()
-
 

@@ -8,7 +8,7 @@ import torch
 import torch.optim as optim
 
 from utils.training_utils import train_one_epoch, validate_one_epoch, AnnealKLCallback, Custom_Metrics, \
-	get_ind_small_tree, compute_growing_leaf, compute_pruning_leaf, get_optimizer, predict
+	get_ind_small_tree, compute_growing_leaf, compute_pruning_leaf, get_optimizer, predict, get_dataset_labels
 from utils.data_utils import get_gen
 from utils.model_utils import return_list_tree, construct_data_tree
 from models.model import TreeVAE
@@ -93,6 +93,10 @@ def run_tree(trainset, trainset_eval, testset, device, configs):
 	while grow and growing_iterations < 150:
 
 		# full model finetuning during growing after every 3 splits
+		# Intermediate full-tree fine tuning
+		# Small Tree를 학습시키고 계속 붙임에 따라 '국소적으로'는 각 leaf를 잘 쪼갠 subtree가 생기겠지만,
+		# 전체 TreeVAE 관점에서는 parent router, 기존 latent path, 새 child router/decoder가 한 objective로
+		# 같이 맞춰진 상태는 아니다. 그래서, 전체 TreeVAE를 3번에 한 번씩 학습한다.
 		if configs['training']['num_epochs_intermediate_fulltrain']>0:
 			if growing_iterations != 0 and growing_iterations % 3 == 0:
 				# Initialize optimizer and schedulers
@@ -136,8 +140,8 @@ def run_tree(trainset, trainset_eval, testset, device, configs):
 		# initialize the smalltree
 		small_model = SmallTreeVAE(depth=depth+1, **configs['training'])
 		small_model.to(device)
-		if graph_mode:
-			small_model = torch.compile(small_model)
+		# if graph_mode:
+		# 	small_model = torch.compile(small_model)
 
 		# Optimizer for smalltree
 		optimizer = get_optimizer(small_model, configs)
@@ -163,8 +167,14 @@ def run_tree(trainset, trainset_eval, testset, device, configs):
 
 		# Check if reached the max number of effective leaves before finetuning unnecessarily
 		# split 할 때마다 leaf의 증가량은 n_ary - 1이다.
+		# n_effective_leaves: 
+		# configs['training']['num_clusters_tree']: 트리가 가질 수 있는 최대 leaf 노드의 수
+
+		# 다음 split을 붙인 뒤 effective leaf 수가 목표 cluster 수에 도달했거나, 더 grow하면 목표 수를 넘길 것 같으면 grow loop를 끝내자
+		# predict, compute_growing_leaf가 무엇인지 파악이 필요하네 3번째 return이 effective leaf nodes인 거 같은데
 		leaf_increment = configs['training']['n_ary'] - 1
 		if n_effective_leaves + leaf_increment >= configs['training']['num_clusters_tree']:
+			# node_leaves_train : leaf 별 정보를 담은 list, 각 원소는 dict -> {'prob': sample-wise probability of reaching the node, 'z_sample': sampled leaf embedding}
 			node_leaves_train = predict(gen_train_eval, model, device, 'node_leaves')
 			_, _, max_growth = compute_growing_leaf(gen_train_eval, model, node_leaves_train, max_depth,
 													configs['training']['batch_size'],
@@ -173,6 +183,8 @@ def run_tree(trainset, trainset_eval, testset, device, configs):
 				break
 
 		growing_iterations += 1
+
+	#-----------------------------------------------------------------------------------------
 
 	# The growing loop of the tree is concluded!
 	# check whether we need to prune the final tree and log pre-pruning dendrogram
@@ -184,9 +196,9 @@ def run_tree(trainset, trainset_eval, testset, device, configs):
 		else:
 			print('\nStarting pruning!\n')
 			yy = np.squeeze(np.argmax(prob_leaves_test, axis=-1))
-			y_test = testset.dataset.targets[testset.indices]
+			y_test = get_dataset_labels(testset)
 			data_tree = construct_data_tree(model, y_predicted=yy, y_true=y_test, n_leaves=len(node_leaves_test),
-											data_name=configs['data']['data_name'])
+											data_name=configs['data']['data_name'], n_ary=configs['training']['n_ary'])
 
 			table = wandb.Table(columns=["node_id", "node_name", "parent", "size"], data=data_tree)
 			fields = {"node_name": "node_name", "node_id": "node_id", "parent": "parent", "size": "size"}
@@ -256,5 +268,3 @@ def run_tree(trainset, trainset_eval, testset, device, configs):
 		_ = gc.collect()
 
 	return model
-
-

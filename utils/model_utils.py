@@ -229,67 +229,116 @@ def return_list_tree(root):
 	return nn.ModuleList(transformations), nn.ModuleList(routers), nn.ModuleList(denses), nn.ModuleList(decoders), nn.ModuleList(routers_q)
 
 
-def construct_tree_fromnpy(model, data_tree, configs):
+def construct_tree_fromnpy(model, data_tree, configs, n_ary=None):
 	from models.model_smalltree import SmallTreeVAE
+	if n_ary is None:
+		n_ary = int(configs['training'].get('n_ary', 2))
 	nodes = {0: {'node': model.tree, 'depth': 0}}
 
-	for i in range(1, len(data_tree)-1):
-		node_left = data_tree[i]
-		node_right = data_tree[i + 1]
-		id_node_left = node_left[0]
-		id_node_right = node_right[0]
+	if n_ary == 2:
+		for i in range(1, len(data_tree)-1):
+			node_left = data_tree[i]
+			node_right = data_tree[i + 1]
+			id_node_left = node_left[0]
+			id_node_right = node_right[0]
 
-		if node_left[2] == node_right[2]:
-			id_parent = node_left[2]
+			if node_left[2] == node_right[2]:
+				id_parent = node_left[2]
+
+				parent = nodes[id_parent]
+				node = parent['node']
+				depth = parent['depth']
+
+				new_depth = depth + 1
+
+				small_model = SmallTreeVAE(new_depth+1, **configs['training'])
+
+				node.router = small_model.decision
+				node.routers_q = small_model.decision_q
+
+				node.decoder = None
+				n = []
+				for j in range(2):
+					dense = small_model.denses[j]
+					transformation = small_model.transformations[j]
+					decoder = small_model.decoders[j]
+					n.append(Node(transformation, None, None, dense, decoder, n_ary=n_ary))
+
+				node.left = n[0]
+				node.right = n[1]
+				node.left.parent = node
+				node.right.parent = node
+
+				nodes[id_node_left] = {'node': node.left, 'depth': new_depth}
+				nodes[id_node_right] = {'node': node.right, 'depth': new_depth}
+			elif data_tree[i][2] != data_tree[i - 1][2]: # Internal node w/ 1 child only
+				id_parent = node_left[2]
+
+				parent = nodes[id_parent]
+				node = parent['node']
+				depth = parent['depth']
+
+				new_depth = depth + 1
+
+				small_model = SmallTreeVAE(new_depth+1, **configs['training'])
+
+				node.router = None
+				node.routers_q = None
+
+				node.decoder = None
+				n = []
+				for j in range(1):
+					dense = small_model.denses[j]
+					transformation = small_model.transformations[j]
+					decoder = small_model.decoders[j]
+					n.append(Node(transformation, None, None, dense, decoder, n_ary=n_ary))
+
+				node.left = n[0]
+				node.left.parent = node
+				nodes[id_node_left] = {'node': node.left, 'depth': new_depth}
+	elif n_ary > 2:
+		children_by_parent = {}
+		for row in data_tree:
+			parent_id = row[2]
+			if parent_id is not None:
+				children_by_parent.setdefault(parent_id, []).append(row)
+
+		queue = [0]
+		while len(queue) != 0:
+			id_parent = queue.pop(0)
+			child_rows = children_by_parent.get(id_parent, [])
+			if len(child_rows) == 0:
+				continue
+			if len(child_rows) > n_ary:
+				raise ValueError("A node in data_tree has more children than n_ary.")
 
 			parent = nodes[id_parent]
 			node = parent['node']
 			depth = parent['depth']
-
 			new_depth = depth + 1
 
 			small_model = SmallTreeVAE(new_depth+1, **configs['training'])
 
-			node.router = small_model.decision
-			node.routers_q = small_model.decision_q
-
 			node.decoder = None
-			n = []
-			for j in range(2):
-				dense = small_model.denses[j]
-				transformation = small_model.transformations[j]
-				decoder = small_model.decoders[j]
-				n.append(Node(transformation, None, None, dense, decoder))
+			if len(child_rows) == 1:
+				node.router = None
+				node.routers_q = None
+			else:
+				node.router = small_model.decision
+				node.routers_q = small_model.decision_q
 
-			node.left = n[0]
-			node.right = n[1]
-
-			nodes[id_node_left] = {'node': node.left, 'depth': new_depth}
-			nodes[id_node_right] = {'node': node.right, 'depth': new_depth}
-		elif data_tree[i][2] != data_tree[i - 1][2]: # Internal node w/ 1 child only
-			id_parent = node_left[2]
-
-			parent = nodes[id_parent]
-			node = parent['node']
-			depth = parent['depth']
-
-			new_depth = depth + 1
-
-			small_model = SmallTreeVAE(new_depth+1, **configs['training'])
-
-			node.router = None
-			node.routers_q = None
-
-			node.decoder = None
-			n = []
-			for j in range(1):
-				dense = small_model.denses[j]
-				transformation = small_model.transformations[j]
-				decoder = small_model.decoders[j]
-				n.append(Node(transformation, None, None, dense, decoder))
-
-			node.left = n[0]
-			nodes[id_node_left] = {'node': node.left, 'depth': new_depth}
+			for child_idx, child_row in enumerate(child_rows):
+				id_child = child_row[0]
+				dense = small_model.denses[child_idx]
+				transformation = small_model.transformations[child_idx]
+				decoder = small_model.decoders[child_idx]
+				child = Node(transformation, None, None, dense, decoder, n_ary=n_ary)
+				child.parent = node
+				node.children[child_idx] = child
+				nodes[id_child] = {'node': child, 'depth': new_depth}
+				queue.append(id_child)
+	else:
+		raise ValueError("n_ary must be at least 2")
 
 	transformations, routers, denses, decoders, routers_q = return_list_tree(model.tree)
 	model.decisions_q = routers_q
@@ -301,7 +350,7 @@ def construct_tree_fromnpy(model, data_tree, configs):
 	return model
 
 
-def construct_data_tree(model, y_predicted, y_true, n_leaves, data_name):
+def construct_data_tree(model, y_predicted, y_true, n_leaves, data_name, n_ary=2):
 	list_nodes = [{'node':model.tree, 'id': 0, 'parent':None}]
 	data = []
 	i = 0
@@ -310,16 +359,24 @@ def construct_data_tree(model, y_predicted, y_true, n_leaves, data_name):
 		current_node = list_nodes.pop(0)
 		if current_node['node'].router is not None:
 			data.append([current_node['id'], str(current_node['id']), current_node['parent'], 10])
-			node_left, node_right = current_node['node'].left, current_node['node'].right
-			i += 1
-			list_nodes.append({'node':node_left, 'id': i, 'parent': current_node['id']})
-			i += 1
-			list_nodes.append({'node':node_right, 'id': i, 'parent': current_node['id']})
+			if n_ary == 2:
+				node_left, node_right = current_node['node'].left, current_node['node'].right
+				i += 1
+				list_nodes.append({'node':node_left, 'id': i, 'parent': current_node['id']})
+				i += 1
+				list_nodes.append({'node':node_right, 'id': i, 'parent': current_node['id']})
+			else:
+				for child in current_node['node'].active_children():
+					i += 1
+					list_nodes.append({'node':child, 'id': i, 'parent': current_node['id']})
 		elif current_node['node'].router is None and current_node['node'].decoder is None:
 			# We are in an internal node with pruned leaves and will only add the non-pruned leaves
 			data.append([current_node['id'], str(current_node['id']), current_node['parent'], 10])
-			node_left, node_right = current_node['node'].left, current_node['node'].right
-			child = node_left if node_left is not None else node_right
+			if n_ary == 2:
+				node_left, node_right = current_node['node'].left, current_node['node'].right
+				child = node_left if node_left is not None else node_right
+			else:
+				child = current_node['node'].single_child()
 			i += 1
 			list_nodes.append({'node': child, 'id': i, 'parent': current_node['id']})
 		else:

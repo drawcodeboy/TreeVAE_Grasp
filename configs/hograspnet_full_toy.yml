@@ -10,10 +10,10 @@ data:
 
 training:
   n_ary: 3
-  num_epochs: 150
-  num_epochs_smalltree: 150
+  num_epochs: 3 # original 150
+  num_epochs_smalltree: 3 # original 150
   num_epochs_intermediate_fulltrain: 0
-  num_epochs_finetuning: 0
+  num_epochs_finetuning: 3 # original 0
   batch_size: 128 # original 256, reduced for OOM issues
   lr: 0.001
   weight_decay: 0.00001
@@ -50,4 +50,4 @@ globals:
   eager_mode: False
   seed: 42
   save_model: True
-  config_name: 'dexgraspnet_toy'
+  config_name: 'hograspnet_full_toy'

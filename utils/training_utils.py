@@ -253,6 +253,32 @@ def move_to(obj, device):
         raise TypeError("Invalid type for move_to")
 
 
+def get_dataset_labels(dataset):
+    if isinstance(dataset, TensorDataset):
+        return dataset.tensors[1]
+
+    if isinstance(dataset, torch.utils.data.Subset):
+        base_dataset = dataset.dataset
+        indices = dataset.indices
+
+        if isinstance(base_dataset, TensorDataset):
+            return base_dataset.tensors[1][indices]
+
+        if hasattr(base_dataset, 'targets'):
+            return torch.as_tensor(base_dataset.targets)[indices]
+
+        if hasattr(base_dataset, 'data_li'):
+            return torch.tensor([base_dataset.data_li[i][1] for i in indices])
+
+    if hasattr(dataset, 'targets'):
+        return torch.as_tensor(dataset.targets)
+
+    if hasattr(dataset, 'data_li'):
+        return torch.tensor([item[1] for item in dataset.data_li])
+
+    raise AttributeError("Cannot infer labels from dataset.")
+
+
 class AnnealKLCallback:
     def __init__(self, model, decay=0.01, start=0.):
         self.decay = decay
@@ -280,22 +306,86 @@ class Decay():
 
 
 def calc_aug_loss(prob_parent, prob_router, augmentation_methods, emb_contr=[]):
+    # prob_parent: [B], probability of each sample reaching the current parent node.
+    # prob_router: [B] in the current binary implementation, containing p(left | x).
+    # The first half of the batch is X' and the second half is X''.
     aug_decisions_loss = torch.zeros(1, device=prob_parent.device)
     prob_parent = prob_parent.detach()
 
     # Get router probabilities of X' and X''
+    # p1, p2: [B / 2], binary router probabilities for the paired augmentations.
     p1, p2 = prob_router[:len(prob_router) // 2], prob_router[len(prob_router) // 2:]
     # Perform invariance regularization
     for aug_method in augmentation_methods:
         # Perform invariance regularization in the decisions
         if aug_method == 'InfoNCE':
+            # torch.stack([p, 1 - p], 1): [B / 2, 2], binary decision probability vector.
+            # p*_normed: [B / 2, 2], L2-normalized decision representation.
             p1_normed = torch.nn.functional.normalize(torch.stack([p1, 1 - p1], 1), dim=1)
             p2_normed = torch.nn.functional.normalize(torch.stack([p2, 1 - p2], 1), dim=1)
+            # pair_sim: [B / 2], similarity between each positive pair X'_i and X''_i.
             pair_sim = torch.exp(torch.sum(p1_normed * p2_normed, dim=1))
+            # p_normed: [B, 2], decision representations for all augmented samples.
             p_normed = torch.cat([p1_normed, p2_normed], dim=0)
+            # matrix_sim: [B, B], pairwise similarities among all augmented samples.
             matrix_sim = torch.exp(torch.matmul(p_normed, p_normed.t()))
+            # norm_factor: [B], denominator for InfoNCE, excluding self-similarity.
             norm_factor = torch.sum(matrix_sim, dim=1) - torch.diag(matrix_sim)
             pair_sim = pair_sim.repeat(2)  # storing sim for X' and X''
+            # info_nce_sample: [B], per-sample InfoNCE loss.
+            info_nce_sample = -torch.log(pair_sim / norm_factor)
+            info_nce = torch.sum(prob_parent * info_nce_sample) / torch.sum(prob_parent)
+            aug_decisions_loss += info_nce
+        # Perform invariance regularization in the bottom-up embeddings
+        elif aug_method == 'instancewise_full':
+            looplen = len(emb_contr)
+            for i in range(looplen):
+                temp_instance = 0.5
+                emb = emb_contr[i]
+                emb1, emb2 = emb[:len(emb) // 2], emb[len(emb) // 2:]
+                emb1_normed = torch.nn.functional.normalize(emb1, dim=1)
+                emb2_normed = torch.nn.functional.normalize(emb2, dim=1)
+                pair_sim = torch.exp(torch.sum(emb1_normed * emb2_normed, dim=1) / temp_instance)
+                emb_normed = torch.cat([emb1_normed, emb2_normed], dim=0)
+                matrix_sim = torch.exp(torch.matmul(emb_normed, emb_normed.t()) / temp_instance)
+                norm_factor = torch.sum(matrix_sim, dim=1) - torch.diag(matrix_sim)
+                pair_sim = pair_sim.repeat(2)  # storing sim for X' and X''
+                info_nce_sample = -torch.log(pair_sim / norm_factor)
+                info_nce = torch.mean(info_nce_sample)
+                info_nce = info_nce / looplen
+                aug_decisions_loss += info_nce
+        else:
+            raise NotImplementedError
+
+    return aug_decisions_loss
+
+def calc_aug_loss_for_cat(prob_parent, prob_router, augmentation_methods, emb_contr=[]):
+    # prob_parent: [B], probability of each sample reaching the current parent node.
+    # prob_router: [B, n_ary], categorical router probabilities over active children.
+    # The first half of the batch is X' and the second half is X''.
+    aug_decisions_loss = torch.zeros(1, device=prob_parent.device)
+    prob_parent = prob_parent.detach()
+
+    # Get router probability vectors of X' and X''
+    # p1, p2: [B / 2, n_ary], categorical router probabilities for paired augmentations.
+    p1, p2 = prob_router[:len(prob_router) // 2], prob_router[len(prob_router) // 2:]
+    # Perform invariance regularization
+    for aug_method in augmentation_methods:
+        # Perform invariance regularization in the decisions
+        if aug_method == 'InfoNCE':
+            # p*_normed: [B / 2, n_ary], L2-normalized categorical decision representation.
+            p1_normed = torch.nn.functional.normalize(p1, dim=1)
+            p2_normed = torch.nn.functional.normalize(p2, dim=1)
+            # pair_sim: [B / 2], similarity between each positive pair X'_i and X''_i.
+            pair_sim = torch.exp(torch.sum(p1_normed * p2_normed, dim=1))
+            # p_normed: [B, n_ary], decision representations for all augmented samples.
+            p_normed = torch.cat([p1_normed, p2_normed], dim=0)
+            # matrix_sim: [B, B], pairwise similarities among all augmented samples.
+            matrix_sim = torch.exp(torch.matmul(p_normed, p_normed.t()))
+            # norm_factor: [B], denominator for InfoNCE, excluding self-similarity.
+            norm_factor = torch.sum(matrix_sim, dim=1) - torch.diag(matrix_sim)
+            pair_sim = pair_sim.repeat(2)  # storing sim for X' and X''
+            # info_nce_sample: [B], per-sample InfoNCE loss.
             info_nce_sample = -torch.log(pair_sim / norm_factor)
             info_nce = torch.sum(prob_parent * info_nce_sample) / torch.sum(prob_parent)
             aug_decisions_loss += info_nce
@@ -391,6 +481,12 @@ def compute_growing_leaf(loader, model, node_leaves, max_depth, batch_size, max_
     """
 
     # count effective number of leaves (non empty leaves)
+    # node_leaves[i]['prob'] shape -> (n_samples) # loader 내에 있던 데이터 전부
+
+    # 각 leaf에 대해 모든 sample의 도달 확률을 더한다.
+    # 이 값은 해당 leaf에 몇 개의 sample이 배정되었는지를 확률적으로 센 값이다.
+    # 전체 leaf의 합으로 나누면 각 leaf가 전체 데이터 중 차지하는 비율이 된다.
+    # 이 비율이 1% 미만인 leaf는 실제로 잘 사용되지 않는 leaf로 보고 제외한다.
     weights = [node_leaves[i]['prob'] for i in range(len(node_leaves))]
     weights_summed = [weights[i].sum() for i in range(len(weights))]
     n_effective_leaves = len(np.where(weights_summed / np.sum(weights_summed) >= 0.01)[0])
@@ -400,7 +496,7 @@ def compute_growing_leaf(loader, model, node_leaves, max_depth, batch_size, max_
     leaf_increment = model.n_ary - 1
     projected_leaves = n_effective_leaves + leaf_increment
 
-    if n_effective_leaves >= max_leaves or projected_leaves > max_leaves:
+    if n_effective_leaves >= max_leaves:
         print('\nReached maximum number of leaves\n')
         return None, None, True
 
@@ -409,11 +505,8 @@ def compute_growing_leaf(loader, model, node_leaves, max_depth, batch_size, max_
 
     else:
         leaves = compute_leaves(model.tree, model.n_ary)
-        n_samples = []
-        if loader.dataset.dataset.__class__ is TensorDataset:
-            y_train = loader.dataset.dataset.tensors[1][loader.dataset.indices]
-        else:
-            y_train = loader.dataset.dataset.targets[loader.dataset.indices]
+        split_candidates = []
+        y_train = get_dataset_labels(loader.dataset)
         # Calculating ground-truth nodes-to-split for logging and model development
         # NOTE: labels are used to evaluate leaf metrics, they are not used to select the leaf
         for i in range(len(node_leaves)):
@@ -424,16 +517,19 @@ def compute_growing_leaf(loader, model, node_leaves, max_depth, batch_size, max_
             y_train_small = y_train[ind]
             # printing distribution of ground-truth classes in leaves
             print(f"Leaf {i}: ", np.unique(y_train_small, return_counts=True))
-            n_samples.append(len(y_train_small))
+            split_candidates.append({
+                'leaf_index': i,
+                'n_samples': len(y_train_small),
+            })
 
         # Highest number of samples indicates splitting
-        split_values = n_samples
-        ind_leaves = np.argsort(np.array(split_values))
-        ind_leaves = ind_leaves[::-1]
+        split_candidates = sorted(split_candidates, key=lambda candidate: candidate['n_samples'], reverse=True)
 
-        print("Ranking of leaves to split: ", ind_leaves)
-        for i in ind_leaves:
-            if n_samples[i] < batch_size:
+        print("Ranking of leaves to split: ", [candidate['leaf_index'] for candidate in split_candidates])
+        for candidate in split_candidates:
+            i = candidate['leaf_index']
+            n_leaf_samples = candidate['n_samples']
+            if n_leaf_samples < batch_size:
                 wandb.log({'Skipped Split': 1})
                 print("We don't split leaves with fewer samples than batch size")
                 continue

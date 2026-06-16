@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 from utils.data_utils import get_gen
 from utils.utils import cluster_acc, dendrogram_purity, leaf_purity
-from utils.training_utils import compute_leaves, validate_one_epoch, Custom_Metrics, predict
+from utils.training_utils import compute_leaves, validate_one_epoch, Custom_Metrics, predict, get_dataset_labels
 from utils.model_utils import construct_data_tree
 from models.losses import loss_reconstruction_cov_mse_eval
 
@@ -39,7 +39,7 @@ def val_tree(trainset, testset, model, device, experiment_path, configs):
 
     # get the data loader
     gen_train_eval = get_gen(trainset, configs, validation=True, shuffle=False)
-    y_train = trainset.dataset.targets[trainset.indices].numpy()
+    y_train = get_dataset_labels(trainset).numpy()
     # compute the leaf probabilities
     prob_leaves_train = predict(gen_train_eval, model, device, 'prob_leaves')
     _ = gc.collect()
@@ -60,7 +60,7 @@ def val_tree(trainset, testset, model, device, experiment_path, configs):
 
     # get the data loader
     gen_test = get_gen(testset, configs, validation=True, shuffle=False)
-    y_test = testset.dataset.targets[testset.indices].numpy()
+    y_test = get_dataset_labels(testset).numpy()
     # compute one validation pass through the test set to log losses
     metrics_calc_test = Custom_Metrics(device)
     validate_one_epoch(gen_test, model, metrics_calc_test, 0, device, test=True)
@@ -83,19 +83,19 @@ def val_tree(trainset, testset, model, device, experiment_path, configs):
                                                                     class_names=range(len(idx)))})
 
     # Determine indices of samples that fall into each leaf for Dendogram Purity & Leaf Purity
-    leaves = compute_leaves(model.tree)
+    leaves = compute_leaves(model.tree, configs['training']['n_ary'])
     ind_samples_of_leaves = []
     for i in range(len(leaves)):
         ind_samples_of_leaves.append([leaves[i]['node'], np.where(y_test_pred == i)[0]])
     # Calculate leaf and dedrogram purity
-    dp = dendrogram_purity(model.tree, y_test, ind_samples_of_leaves)
-    lp = leaf_purity(model.tree, y_test, ind_samples_of_leaves)
+    dp = dendrogram_purity(model.tree, y_test, ind_samples_of_leaves, configs['training']['n_ary'])
+    lp = leaf_purity(model.tree, y_test, ind_samples_of_leaves, configs['training']['n_ary'])
     # Note: Only comparable DP & LP values wrt baselines if they have the same n_leaves for all methods
     wandb.log({"Test Dendrogram Purity": dp, "Test Leaf Purity": lp})
 
     # Save the tree structure of TreeVAE and log it
     data_tree = construct_data_tree(model, y_predicted=y_test_pred, y_true=y_test, n_leaves=len(node_leaves_test),
-                                    data_name=configs['data']['data_name'])
+                                    data_name=configs['data']['data_name'], n_ary=configs['training']['n_ary'])
 
     if configs['globals']['save_model']:
         with open(experiment_path / 'data_tree.npy', 'wb') as save_file:

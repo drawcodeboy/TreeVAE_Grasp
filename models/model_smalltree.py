@@ -5,9 +5,10 @@ import torch
 import torch.nn as nn
 import torch.distributions as td
 from models.networks import get_decoder, MLP, Router, Dense
+from models.networks_pc import get_decoder_pc
 from utils.model_utils import compute_posterior
 from models.losses import loss_reconstruction_binary, loss_reconstruction_mse
-from utils.training_utils import calc_aug_loss
+from utils.training_utils import calc_aug_loss, calc_aug_loss_for_cat
 
 class SmallTreeVAE(nn.Module):
     """
@@ -92,9 +93,13 @@ class SmallTreeVAE(nn.Module):
         self.transformations = nn.ModuleList([MLP(self.encoded_size[0], self.encoded_size[1], self.hidden_layer[0]) for _ in range(self.n_ary)])
         self.decision = Router(self.encoded_size[0], n_ary=self.n_ary, hidden_units=self.hidden_layer[0])
         self.decision_q = Router(self.hidden_layer[0], n_ary=self.n_ary, hidden_units=self.hidden_layer[0])
+        '''
         self.decoders = nn.ModuleList([get_decoder(architecture=self.kwargs['encoder'], input_shape=self.encoded_size[1],
                                                   output_shape=self.inp_shape, activation=self.activation) for _ in range(self.n_ary)])
-
+        '''
+        self.decoders = nn.ModuleList([get_decoder_pc(architecture=self.kwargs['decoder']['architecture'], 
+                                                input_shape=encoded_size_gen[-1],
+                                                num_points=self.kwargs['decoder']['num_points']) for _ in range(self.n_ary)])
     def forward(self, x, z_parent, p, bottom_up):
         """
         Forward pass of the SmallTreeVAE model.
@@ -161,7 +166,9 @@ class SmallTreeVAE(nn.Module):
             kl_decisions = torch.mean(p * kl_decisions.sum(dim=1))
 
             aug_decisions_loss = torch.zeros(1, device=device)
-            # n-ary calc_aug_loss 대응 전까지는 여기서 skip 또는 별도 구현 필요
+            if self.training is True and self.augment is True and 'simple' not in self.augmentation_method:
+                aug_decisions_loss += calc_aug_loss_for_cat(prob_parent=p, prob_router=prob_child_q,
+                                                            augmentation_methods=self.augmentation_method)
 
         reconstructions = []
         kl_nodes = torch.zeros(1, device=device)
