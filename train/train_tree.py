@@ -200,6 +200,7 @@ def run_tree(trainset, trainset_eval, testset, device, configs):
 			data_tree = construct_data_tree(model, y_predicted=yy, y_true=y_test, n_leaves=len(node_leaves_test),
 											data_name=configs['data']['data_name'], n_ary=configs['training']['n_ary'])
 
+			# Pruning 하기 전 tree 구조를 기록
 			table = wandb.Table(columns=["node_id", "node_name", "parent", "size"], data=data_tree)
 			fields = {"node_name": "node_name", "node_id": "node_id", "parent": "parent", "size": "size"}
 			dendro = wandb.plot_table(vega_spec_name="stacey/flat_tree", data_table=table, fields=fields)

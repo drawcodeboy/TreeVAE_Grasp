@@ -7,7 +7,7 @@ import torch.distributions as td
 from utils.model_utils import construct_tree, compute_posterior
 from models.networks import get_encoder, get_decoder, MLP, Router, Dense
 from models.networks_pc import get_encoder_pc, get_decoder_pc
-from models.losses import loss_reconstruction_binary, loss_reconstruction_mse
+from models.losses import loss_reconstruction_binary, loss_reconstruction_mse, loss_reconstruction_chamfer
 from utils.model_utils import return_list_tree
 from utils.training_utils import calc_aug_loss, calc_aug_loss_for_cat
 
@@ -106,6 +106,8 @@ class TreeVAE(nn.Module):
             self.loss = loss_reconstruction_binary
         elif self.activation == "mse":
             self.loss = loss_reconstruction_mse
+        elif self.activation == "chamfer": # For point cloud
+            self.loss = loss_reconstruction_chamfer
         else:
             raise NotImplementedError
         # KL-annealing weight initialization
@@ -238,8 +240,7 @@ class TreeVAE(nn.Module):
         '''
         for _ in range(self.n_ary ** (self.depth)):
             self.decoders.append(get_decoder_pc(architecture=self.kwargs['decoder']['architecture'], 
-                                                input_shape=encoded_size_gen[-1],
-                                                num_points=self.kwargs['decoder']['num_points']))
+                                                input_shape=encoded_size_gen[-1]))
 
         # construct the tree
         self.tree = construct_tree(transformations=self.transformations, routers=self.decisions,

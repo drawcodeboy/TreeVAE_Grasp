@@ -523,6 +523,9 @@ def compute_growing_leaf(loader, model, node_leaves, max_depth, batch_size, max_
             })
 
         # Highest number of samples indicates splitting
+        # split_candiates is list
+        # the element는 다음과 같이 생김
+        # {'leaf_index': int -> # node_leaves에서 몇 번째 leaf인지, 'n_leaf_samples': int -> 이 leaf에 속한다고 판단된 train sample 수}
         split_candidates = sorted(split_candidates, key=lambda candidate: candidate['n_samples'], reverse=True)
 
         print("Ranking of leaves to split: ", [candidate['leaf_index'] for candidate in split_candidates])
@@ -537,6 +540,7 @@ def compute_growing_leaf(loader, model, node_leaves, max_depth, batch_size, max_
                 leaves[i]['node'].expand = False
                 print('\nReached maximum architecture\n')
                 print('\n!!ATTENTION!! architecture is not deep enough\n')
+                # 아래를 break가 아니라 continue로 바꾸면, 다른 leaf에 기회를 주게 됨 (확실한지는 모르겠음)
                 break
             else:
                 ind_leaf = i

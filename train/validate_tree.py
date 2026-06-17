@@ -187,6 +187,30 @@ def compute_likelihood(testset, model, device, configs):
         print('Test Reconstruction Loss:',
               torch.mean(output_rec_loss) / (torch.log(torch.tensor(2)) * configs['training']['inp_shape']) + 8)
         model.loss = old_loss
+    elif configs['training']['activation'] == 'chamfer':
+        # Chamfer distance is a point-set reconstruction cost, not a normalized likelihood model.
+        # Report the same importance-weighted ELBO objective used by training without image bpd conversion.
+        output_elbo, output_rec_loss = predict(gen_test, model, device, 'elbo', 'rec_loss')
+        mean_elbo = torch.mean(output_elbo).item()
+        mean_rec_loss = torch.mean(output_rec_loss).item()
+
+        # Row: test set length, Col: estimation samples
+        elbo = np.zeros((len(testset), ESTIMATION_SAMPLES))
+        for j in range(ESTIMATION_SAMPLES):
+            elbo[:, j] = predict(gen_test, model, device, 'elbo')
+            _ = gc.collect()
+
+        # Importance sampling
+        elbo_new = elbo[:, :ESTIMATION_SAMPLES] # 필요가 없긴 한데, 일단 놔두자.
+        log_likel = np.log(1 / ESTIMATION_SAMPLES) + scipy.special.logsumexp(-elbo_new, axis=1)
+        marginal_elbo_bound = np.sum(log_likel) / len(testset)
+        wandb.log({
+            "test chamfer elbo bound": marginal_elbo_bound,
+            "test chamfer reconstruction loss": mean_rec_loss,
+        })
+        print('Test Chamfer ELBO Bound:', marginal_elbo_bound)
+        print('Test ELBO:', -mean_elbo)
+        print('Test Chamfer Reconstruction Loss:', mean_rec_loss)
     else:
         raise NotImplementedError
     return

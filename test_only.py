@@ -1,5 +1,4 @@
 import argparse
-import gc
 from pathlib import Path
 
 import numpy as np
@@ -7,7 +6,6 @@ import torch
 import wandb
 import yaml
 from sklearn.metrics.cluster import adjusted_rand_score, normalized_mutual_info_score
-from tqdm import tqdm
 
 from models.model import TreeVAE
 from train.validate_tree import compute_likelihood
@@ -181,12 +179,6 @@ def main():
         action="store_true",
         help="Also compute the saved config's test log-likelihood routine.",
     )
-    parser.add_argument(
-        "--ll_samples",
-        type=int,
-        default=1000,
-        help="Number of importance samples for test log-likelihood estimation.",
-    )
     args = parser.parse_args()
 
     checkpoint_path = args.checkpoint_path.expanduser().resolve()
@@ -206,54 +198,9 @@ def main():
     evaluate_test_only(testset, model, device, configs)
 
     if args.compute_ll:
-        compute_likelihood_for_checkpoint(testset, model, device, configs, args.ll_samples)
+        compute_likelihood(testset, model, device, configs)
 
     wandb.finish(quiet=True)
-
-
-def compute_likelihood_for_checkpoint(testset, model, device, configs, estimation_samples):
-    decoder_config = configs["training"].get("decoder", {})
-    is_pointcloud_model = isinstance(decoder_config, dict) and decoder_config.get("architecture") == "pointnet"
-
-    if configs["training"]["activation"] == "mse" and is_pointcloud_model:
-        compute_pointcloud_mse_likelihood_bound(testset, model, device, configs, estimation_samples)
-        return
-
-    compute_likelihood(testset, model, device, configs)
-
-
-def compute_pointcloud_mse_likelihood_bound(testset, model, device, configs, estimation_samples):
-    gen_test = get_gen(testset, configs, validation=True, shuffle=False)
-    print(
-        "\nComputing point-cloud MSE log-likelihood bound with "
-        f"{estimation_samples} importance samples.... it might take a while."
-    )
-    print(
-        "Note: this uses the model's trained MSE reconstruction energy as the negative log-likelihood term. "
-        "It is comparable to this checkpoint's ELBO objective, not to image bpd."
-    )
-
-    elbo_samples = []
-    for _ in tqdm(range(estimation_samples)):
-        elbo_samples.append(predict(gen_test, model, device, "elbo"))
-        _ = gc.collect()
-
-    elbo = torch.stack(elbo_samples, dim=1)
-    log_likelihood_bound = torch.logsumexp(-elbo, dim=1) - np.log(estimation_samples)
-    marginal_log_likelihood = torch.mean(log_likelihood_bound)
-
-    output_elbo, output_rec_loss = predict(gen_test, model, device, "elbo", "rec_loss")
-    test_elbo = -torch.mean(output_elbo)
-    test_reconstruction_loss = torch.mean(output_rec_loss)
-
-    wandb.log({
-        "test log-likelihood": marginal_log_likelihood,
-        "test elbo": test_elbo,
-        "test reconstruction loss": test_reconstruction_loss,
-    })
-    print("Test Log-Likelihood Bound:", marginal_log_likelihood.item())
-    print("Test ELBO:", test_elbo.item())
-    print("Test Reconstruction Loss:", test_reconstruction_loss.item())
 
 
 if __name__ == "__main__":

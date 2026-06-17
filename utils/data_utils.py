@@ -298,7 +298,7 @@ def get_data(configs):
 		trainset_eval = DexGraspNetToyDataset(cfg=configs['data'], split='train', transform=transform_eval)
 		testset = DexGraspNetToyDataset(cfg=configs['data'], split='test', transform=transform_eval)
 
-	elif data_name == 'hograspnet_full_toy':
+	elif data_name in ['hograspnet_full_toy', 'hograspnet_uniform_toy']:
 		reset_random_seeds(configs['globals']['seed'])
 
 		transform_eval = T.Compose([])
@@ -335,9 +335,10 @@ def get_data(configs):
 									   transform=transform_eval)
 		
 		# Debug 용 Subset을 써서 전체 동작을 확인하기 위해 데이터 수를 줄임
-		trainset = torch.utils.data.Subset(trainset, range(500))
-		trainset_eval = torch.utils.data.Subset(trainset_eval, range(500))
-		testset = torch.utils.data.Subset(testset, range(500))
+		# debug_count = 100
+		# trainset = torch.utils.data.Subset(trainset, range(debug_count))
+		# trainset_eval = torch.utils.data.Subset(trainset_eval, range(debug_count))
+		# testset = torch.utils.data.Subset(testset, range(debug_count))
 
 	else:
 		raise NotImplementedError('This dataset is not supported!')

@@ -235,6 +235,12 @@ def construct_tree_fromnpy(model, data_tree, configs, n_ary=None):
 		n_ary = int(configs['training'].get('n_ary', 2))
 	nodes = {0: {'node': model.tree, 'depth': 0}}
 
+	def get_smalltree_depth(child_depth):
+		# SmallTreeVAE is trained with depth=parent_depth+1 when splitting a
+		# leaf. Root children are initialized by TreeVAE, but depth=2 matches
+		# their module shapes during checkpoint reconstruction.
+		return max(2, child_depth)
+
 	if n_ary == 2:
 		for i in range(1, len(data_tree)-1):
 			node_left = data_tree[i]
@@ -251,7 +257,7 @@ def construct_tree_fromnpy(model, data_tree, configs, n_ary=None):
 
 				new_depth = depth + 1
 
-				small_model = SmallTreeVAE(new_depth+1, **configs['training'])
+				small_model = SmallTreeVAE(get_smalltree_depth(new_depth), **configs['training'])
 
 				node.router = small_model.decision
 				node.routers_q = small_model.decision_q
@@ -280,7 +286,7 @@ def construct_tree_fromnpy(model, data_tree, configs, n_ary=None):
 
 				new_depth = depth + 1
 
-				small_model = SmallTreeVAE(new_depth+1, **configs['training'])
+				small_model = SmallTreeVAE(get_smalltree_depth(new_depth), **configs['training'])
 
 				node.router = None
 				node.routers_q = None
@@ -317,7 +323,7 @@ def construct_tree_fromnpy(model, data_tree, configs, n_ary=None):
 			depth = parent['depth']
 			new_depth = depth + 1
 
-			small_model = SmallTreeVAE(new_depth+1, **configs['training'])
+			small_model = SmallTreeVAE(get_smalltree_depth(new_depth), **configs['training'])
 
 			node.decoder = None
 			if len(child_rows) == 1:

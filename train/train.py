@@ -52,17 +52,13 @@ def run_experiment(configs):
 	# ADD YOUR WANDB ENTITY
 	wandb.init(
 		project="treevae",
-		entity="test",
 		config=configs, 
+		group=configs['run_name'],
 		mode=configs['globals']['wandb_logging']
 	)
 
-	if configs['globals']['wandb_logging'] in ['online', 'disabled']:
-		wandb.run.name = wandb.run.name.split("-")[-1] + "-"+ configs['run_name']
-	elif configs['globals']['wandb_logging'] == 'offline':
-		wandb.run.name = configs['run_name']
-	else:
-		raise ValueError('wandb needs to be set to online, offline or disabled.')
+	if configs['globals']['wandb_logging'] not in ['online', 'offline', 'disabled']:
+		ValueError('wandb needs to be set to online, offline or disabled.')
 
 	# Reproducibility
 	reset_random_seeds(configs['globals']['seed'])
