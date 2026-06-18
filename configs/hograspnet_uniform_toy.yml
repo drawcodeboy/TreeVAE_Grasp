@@ -10,10 +10,10 @@ data:
 
 training:
   n_ary: 3
-  num_epochs: 20 # original 150
+  num_epochs: 100 # original 150
   num_epochs_smalltree: 20 # original 150
   num_epochs_intermediate_fulltrain: 0
-  num_epochs_finetuning: 0 # original 0
+  num_epochs_finetuning: 10 # original 0
   batch_size: 16 # original 256, reduced for OOM issues
   lr: 0.001
   weight_decay: 0.00001

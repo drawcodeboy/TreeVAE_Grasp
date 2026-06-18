@@ -82,6 +82,8 @@ def run_tree(trainset, trainset_eval, testset, device, configs, resume_checkpoin
 	alpha_scheduler = AnnealKLCallback(model, decay=configs['training']['decay_kl'],
 									   start=configs['training']['kl_start'])
 
+	################################# Obtain RESUME information #################################
+
 	start_epoch = 0
 	global_step = 0
 	resume_phase = resume_checkpoint['phase'] if resume_checkpoint is not None else None
