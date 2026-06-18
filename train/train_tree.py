@@ -200,6 +200,8 @@ def run_tree(trainset, trainset_eval, testset, device, configs, resume_checkpoin
 	}:
 		growing_iterations = resume_checkpoint.get('growing_iterations', resume_checkpoint['phase_epoch'])
 		print(f"Continuing grow loop from iteration {growing_iterations}")
+
+
 	while grow and growing_iterations < 150:
 		resuming_smalltree = (
 			resume_phase == ResumePhase.SMALLTREE_TRAINING
