@@ -10,7 +10,7 @@ import torch
 
 from utils.data_utils import get_data
 from utils.utils import reset_random_seeds
-from utils.checkpoint_utils import load_checkpoint
+from utils.checkpoint_utils import ResumePhase, load_checkpoint, validate_resume_config
 from train.train_tree import run_tree
 from train.validate_tree import val_tree
 
@@ -43,6 +43,11 @@ def run_experiment(configs):
 	resume_from = configs['globals'].get('resume_from')
 	if resume_from:
 		resume_checkpoint = load_checkpoint(Path(resume_from), device)
+		validate_resume_config(
+			resume_checkpoint['configs'],
+			configs,
+			strict=resume_checkpoint['phase'] != ResumePhase.INITIAL_TRAINING,
+		)
 		experiment_path = Path(resume_checkpoint['experiment_path']) 
 		ex_name = experiment_path.name
 		if not experiment_path.exists():
@@ -59,6 +64,8 @@ def run_experiment(configs):
 	# Wandb
 	os.environ['WANDB_CACHE_DIR'] = os.path.join(project_dir, '../wandb', '.cache', 'wandb')
 	os.environ["WANDB_SILENT"] = "true"
+	if configs['globals']['wandb_logging'] not in ['online', 'offline', 'disabled']:
+		raise ValueError('wandb needs to be set to online, offline or disabled.')
 
 	# ADD YOUR WANDB ENTITY
 	wandb_kwargs = {
@@ -73,9 +80,6 @@ def run_experiment(configs):
 	wandb.init(**wandb_kwargs)
 	configs['globals']['wandb_run_id'] = wandb.run.id if wandb.run is not None else None
 
-	if configs['globals']['wandb_logging'] not in ['online', 'offline', 'disabled']:
-		ValueError('wandb needs to be set to online, offline or disabled.')
-
 	# Reproducibility
 	reset_random_seeds(configs['globals']['seed'])
 
@@ -83,7 +87,15 @@ def run_experiment(configs):
 	trainset, trainset_eval, testset = get_data(configs)
 
 	# Run the full training of treeVAE model, including the growing of the tree
-	model = run_tree(trainset, trainset_eval, testset, device, configs)
+	model = run_tree(
+		trainset,
+		trainset_eval,
+		testset,
+		device,
+		configs,
+		resume_checkpoint=resume_checkpoint,
+		experiment_path=experiment_path,
+	)
 
 	# Save model
 	if configs['globals']['save_model']:

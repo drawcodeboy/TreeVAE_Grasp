@@ -51,7 +51,12 @@ def reset_random_seeds(seed):
 
 def merge_yaml_args(configs, args):
 	arg_dict = args.__dict__
+	# yml 파일에 parser가 있는 경우도 있는데, num_workers 같은 걸 여기서 할당
+	# 이렇게 새롭게 dictionary를 선언해버리면, parser 정보가 날아가는 거 아닌가?
 	configs['parser'] = dict()
+
+	# yml 파일에서 이중 dictionary를 쓰면 안 되겠네. 애초에 안 되는 건가?
+	# 
 	for key, value in arg_dict.items():
 		flag = True
 		# Replace/Create values in config if they are defined by arg in parser.
@@ -87,7 +92,9 @@ def prepare_config(args, project_dir):
 		configs = yaml.safe_load(yamlfile)
 
 	# Override config if args in parser
+	# YAML에 있던 config에 argparse로 받은 인자 override
 	configs = merge_yaml_args(configs, args)
+
 	if isinstance(configs['training']['latent_dim'], str):
 		a = configs['training']['latent_dim'].split(",")
 		configs['training']['latent_dim'] = [int(i) for i in a]
@@ -97,8 +104,6 @@ def prepare_config(args, project_dir):
 	
 	a = configs['training']['augmentation_method'].split(",")
 	configs['training']['augmentation_method'] = [str(i) for i in a]
-
-
 
 	configs['globals']['results_dir'] = os.path.join(project_dir, 'models/experiments')
 	configs['globals']['results_dir'] = Path(configs['globals']['results_dir']).absolute()

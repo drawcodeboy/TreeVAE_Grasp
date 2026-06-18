@@ -229,6 +229,196 @@ def return_list_tree(root):
 	return nn.ModuleList(transformations), nn.ModuleList(routers), nn.ModuleList(denses), nn.ModuleList(decoders), nn.ModuleList(routers_q)
 
 
+def serialize_tree_topology(root):
+	"""
+	Serialize the current TreeVAE node topology without tensor weights.
+
+	Each row stores the node id, parent id, child slot inside the parent, depth,
+	and whether the node currently owns router/decoder modules. For n-ary trees,
+	the child slot is important because pruning can leave holes in children.
+	"""
+	topology = {
+		"version": 1,
+		"n_ary": root.n_ary,
+		"nodes": [],
+	}
+	queue = [{"node": root, "id": 0, "parent_id": None, "slot": None, "depth": 0}]
+	next_id = 1
+
+	while len(queue) != 0:
+		current = queue.pop(0)
+		node = current["node"]
+		topology["nodes"].append({
+			"id": current["id"],
+			"parent_id": current["parent_id"],
+			"slot": current["slot"],
+			"depth": current["depth"],
+			"has_router": node.router is not None,
+			"has_decoder": node.decoder is not None,
+			"expand": bool(node.expand),
+		})
+
+		for slot, child in enumerate(node.child_slots()):
+			if child is None:
+				continue
+			queue.append({
+				"node": child,
+				"id": next_id,
+				"parent_id": current["id"],
+				"slot": slot,
+				"depth": current["depth"] + 1,
+			})
+			next_id += 1
+
+	return topology
+
+
+def restore_tree_from_topology(model, topology, configs):
+	from models.model_smalltree import SmallTreeVAE
+
+	n_ary = int(topology.get("n_ary", configs['training'].get('n_ary', 2)))
+	if n_ary != model.n_ary:
+		raise ValueError(f"Topology n_ary={n_ary} does not match model n_ary={model.n_ary}.")
+	if topology.get("version") != 1:
+		raise ValueError(f"Unsupported topology version: {topology.get('version')}")
+
+	nodes_by_id = {row["id"]: row for row in topology["nodes"]}
+	if 0 not in nodes_by_id:
+		raise ValueError("Topology is missing root node id 0.")
+
+	children_by_parent = {}
+	for row in topology["nodes"]:
+		parent_id = row["parent_id"]
+		if parent_id is not None:
+			children_by_parent.setdefault(parent_id, []).append(row)
+
+	def get_smalltree_depth(child_depth):
+		return max(2, child_depth)
+
+	initial_depth = int(configs['training'].get('initial_depth', 0))
+	node_objects = {0: model.tree}
+	model.tree.parent = None
+	model.tree.expand = bool(nodes_by_id[0].get("expand", True))
+
+	queue = [0]
+	while len(queue) != 0:
+		parent_id = queue.pop(0)
+		parent_node = node_objects[parent_id]
+		parent_row = nodes_by_id[parent_id]
+		child_rows = sorted(children_by_parent.get(parent_id, []), key=lambda row: row["slot"])
+
+		if len(child_rows) == 0:
+			parent_node.router = None
+			parent_node.routers_q = None
+			if not parent_row.get("has_decoder", parent_node.decoder is not None):
+				parent_node.decoder = None
+			continue
+
+		parent_depth = int(parent_row["depth"])
+		new_depth = parent_depth + 1
+		reuse_existing_children = parent_depth < initial_depth
+
+		parent_node.decoder = None
+		if reuse_existing_children:
+			existing_children = parent_node.child_slots()
+		else:
+			small_model = SmallTreeVAE(get_smalltree_depth(new_depth), **configs['training'])
+			existing_children = [None for _ in range(n_ary)]
+			parent_node.left = None
+			parent_node.right = None
+			parent_node.children = [None for _ in range(n_ary)]
+
+		if len(child_rows) > 1 and not reuse_existing_children:
+			parent_node.router = small_model.decision
+			parent_node.routers_q = small_model.decision_q
+		elif len(child_rows) == 1:
+			parent_node.router = None
+			parent_node.routers_q = None
+
+		child_slots_to_keep = {int(child_row["slot"]) for child_row in child_rows}
+		if reuse_existing_children:
+			for slot in range(n_ary):
+				if slot in child_slots_to_keep:
+					continue
+				if n_ary == 2:
+					if slot == 0:
+						parent_node.left = None
+					else:
+						parent_node.right = None
+				parent_node.children[slot] = None
+
+		for child_row in child_rows:
+			slot = int(child_row["slot"])
+			if slot < 0 or slot >= n_ary:
+				raise ValueError(f"Invalid child slot {slot} for n_ary={n_ary}.")
+
+			if reuse_existing_children:
+				child = existing_children[slot]
+				if child is None:
+					raise ValueError(
+						f"Topology expects an initial-tree child at depth {new_depth}, slot {slot}, "
+						"but the config-created model does not have it."
+					)
+				child.expand = bool(child_row.get("expand", True))
+			else:
+				child = Node(
+					transformation=small_model.transformations[slot],
+					router=None,
+					routers_q=None,
+					dense=small_model.denses[slot],
+					decoder=small_model.decoders[slot],
+					expand=bool(child_row.get("expand", True)),
+					n_ary=n_ary,
+				)
+			child.parent = parent_node
+			if n_ary == 2:
+				if slot == 0:
+					parent_node.left = child
+				else:
+					parent_node.right = child
+			parent_node.children[slot] = child
+			node_objects[child_row["id"]] = child
+			queue.append(child_row["id"])
+
+	transformations, routers, denses, decoders, routers_q = return_list_tree(model.tree)
+	model.decisions_q = routers_q
+	model.transformations = transformations
+	model.decisions = routers
+	model.denses = denses
+	model.decoders = decoders
+	model.depth = model.compute_depth()
+	return model
+
+
+def get_node_path(root, target_node):
+	path = []
+	current_node = target_node
+	while current_node is not root:
+		parent = current_node.parent
+		if parent is None:
+			raise ValueError("Target node is not attached under the provided root.")
+		for slot, child in enumerate(parent.child_slots()):
+			if child is current_node:
+				path.append(slot)
+				break
+		else:
+			raise ValueError("Could not find target node in its parent's child slots.")
+		current_node = parent
+	return list(reversed(path))
+
+
+def find_node_by_path(root, path):
+	node = root
+	for slot in path:
+		child_slots = node.child_slots()
+		if slot < 0 or slot >= len(child_slots):
+			raise ValueError(f"Invalid child slot {slot} for node with {len(child_slots)} slots.")
+		node = child_slots[slot]
+		if node is None:
+			raise ValueError(f"Path points to a pruned/missing child at slot {slot}.")
+	return node
+
+
 def construct_tree_fromnpy(model, data_tree, configs, n_ary=None):
 	from models.model_smalltree import SmallTreeVAE
 	if n_ary is None:

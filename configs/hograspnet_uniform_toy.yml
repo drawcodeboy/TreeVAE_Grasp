@@ -45,7 +45,7 @@ parser:
   num_workers: 2
 
 globals:
-  wandb_logging: 'enabled'
+  wandb_logging: 'online'
   eager_mode: False
   seed: 42
   save_model: True
