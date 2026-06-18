@@ -46,4 +46,5 @@ globals:
   eager_mode: False
   seed: 42
   save_model: True
+  resume_from:
   config_name: 'dexgraspnet_toy'

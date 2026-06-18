@@ -48,6 +48,7 @@ def main():
     parser.add_argument('--num_workers', type=int, help='number of workers in dataloader')
     parser.add_argument('--seed', type=int, help='random number generator seed')
     parser.add_argument('--wandb_logging', type=str, help='online, disabled, offline enables logging in wandb')
+    parser.add_argument('--resume_from', type=str, help='path to checkpoint_last.pt for phase-boundary resume')
 
     # Specify config name
     parser.add_argument('--config_name', default='mnist', type=str,

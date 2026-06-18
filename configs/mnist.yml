@@ -36,4 +36,5 @@ globals:
   eager_mode: True # Whether to run in eager or graph mode
   seed: 42 # Random seed
   save_model: False # Whether to save the model. Set to True for inspecting models in notebook
+  resume_from:
   config_name: 'mnist' 

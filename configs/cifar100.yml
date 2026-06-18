@@ -36,4 +36,5 @@ globals:
   eager_mode: False
   seed: 42
   save_model: False
+  resume_from:
   config_name: 'cifar100'

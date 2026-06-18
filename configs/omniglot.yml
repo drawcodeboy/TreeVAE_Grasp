@@ -38,4 +38,5 @@ globals:
   eager_mode: True
   seed: 42
   save_model: False
+  resume_from:
   config_name: 'omniglot'

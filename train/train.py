@@ -10,6 +10,7 @@ import torch
 
 from utils.data_utils import get_data
 from utils.utils import reset_random_seeds
+from utils.checkpoint_utils import load_checkpoint
 from train.train_tree import run_tree
 from train.validate_tree import val_tree
 
@@ -38,11 +39,21 @@ def run_experiment(configs):
 
 	# Set paths
 	project_dir = Path(__file__).absolute().parent
-	timestr = time.strftime("%Y%m%d-%H%M%S")
-	ex_name = "{}_{}".format(str(timestr), uuid.uuid4().hex[:5])
-	experiment_path = configs['globals']['results_dir'] / configs['data']['data_name'] / ex_name
-	experiment_path.mkdir(parents=True)
-	os.makedirs(os.path.join(project_dir, '../models/logs', ex_name))
+	resume_checkpoint = None
+	resume_from = configs['globals'].get('resume_from')
+	if resume_from:
+		resume_checkpoint = load_checkpoint(Path(resume_from), device)
+		experiment_path = Path(resume_checkpoint['experiment_path']) 
+		ex_name = experiment_path.name
+		if not experiment_path.exists():
+			raise FileNotFoundError(f"Resume experiment path does not exist: {experiment_path}")
+	else:
+		timestr = time.strftime("%Y%m%d-%H%M%S")
+		ex_name = "{}_{}".format(str(timestr), uuid.uuid4().hex[:5])
+		# yml 파일에 result_dir이라는 attribute는 없긴 한데, 이거는 prepare_config()함수에서 정리됨.
+		experiment_path = configs['globals']['results_dir'] / configs['data']['data_name'] / ex_name
+		experiment_path.mkdir(parents=True)
+	os.makedirs(os.path.join(project_dir, '../models/logs', ex_name), exist_ok=True)
 	print("Experiment path: ", experiment_path)
 
 	# Wandb
@@ -50,12 +61,17 @@ def run_experiment(configs):
 	os.environ["WANDB_SILENT"] = "true"
 
 	# ADD YOUR WANDB ENTITY
-	wandb.init(
-		project="treevae",
-		config=configs, 
-		group=configs['run_name'],
-		mode=configs['globals']['wandb_logging']
-	)
+	wandb_kwargs = {
+		"project": "treevae",
+		"config": configs,
+		"group": configs['run_name'],
+		"mode": configs['globals']['wandb_logging'],
+	}
+	if resume_checkpoint is not None and resume_checkpoint.get('wandb_run_id') is not None:
+		wandb_kwargs["id"] = resume_checkpoint['wandb_run_id']
+		wandb_kwargs["resume"] = "allow"
+	wandb.init(**wandb_kwargs)
+	configs['globals']['wandb_run_id'] = wandb.run.id if wandb.run is not None else None
 
 	if configs['globals']['wandb_logging'] not in ['online', 'offline', 'disabled']:
 		ValueError('wandb needs to be set to online, offline or disabled.')
