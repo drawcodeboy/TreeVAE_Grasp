@@ -1,18 +1,153 @@
 import argparse
+import os
 from pathlib import Path
 
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import wandb
 import yaml
+from matplotlib.patches import Patch
 from sklearn.metrics.cluster import adjusted_rand_score, normalized_mutual_info_score
 
 from models.model import TreeVAE
 from train.validate_tree import compute_likelihood
 from utils.data_utils import get_data, get_gen
 from utils.model_utils import construct_data_tree, construct_tree_fromnpy
+from utils.taxonomy_class_utils import taxoclass
 from utils.training_utils import Custom_Metrics, compute_leaves, get_dataset_labels, predict, validate_one_epoch
 from utils.utils import cluster_acc, dendrogram_purity, leaf_purity, reset_random_seeds
+
+
+def compute_tree_layout(data_tree):
+    children_by_parent = {}
+    for node_id, _, parent_id, _ in data_tree:
+        if parent_id is not None:
+            children_by_parent.setdefault(parent_id, []).append(node_id)
+
+    for children in children_by_parent.values():
+        children.sort()
+
+    positions = {}
+    next_leaf_x = 0
+
+    def place_node(node_id, depth):
+        nonlocal next_leaf_x
+        children = children_by_parent.get(node_id, [])
+        if not children:
+            positions[node_id] = (next_leaf_x, -depth)
+            next_leaf_x += 1
+            return positions[node_id][0]
+
+        child_x = [place_node(child_id, depth + 1) for child_id in children]
+        positions[node_id] = (float(np.mean(child_x)), -depth)
+        return positions[node_id][0]
+
+    place_node(data_tree[0][0], 0)
+    return positions, children_by_parent
+
+
+def plot_tree_with_leaf_label_histograms(data_tree, leaf_label_counts, class_labels, save_path, use_taxonomy_colors=False):
+    positions, children_by_parent = compute_tree_layout(data_tree)
+    n_leaves = max(1, len(leaf_label_counts))
+    n_classes = max(1, len(class_labels))
+    max_depth = max(abs(y) for _, y in positions.values()) if positions else 1
+    if use_taxonomy_colors:
+        class_colors = taxoclass.colors_for_labels(class_labels)
+    else:
+        class_colors = "#2f6f9f"
+
+    fig_width = max(10, n_leaves * 1.8)
+    fig_height = max(6, (max_depth + 1) * 1.4 + min(3.0, n_classes * 0.18))
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+
+    for parent_id, child_ids in children_by_parent.items():
+        parent_x, parent_y = positions[parent_id]
+        for child_id in child_ids:
+            child_x, child_y = positions[child_id]
+            ax.plot([parent_x, child_x], [parent_y, child_y], color="0.65", linewidth=1.5, zorder=1)
+
+    leaf_rows = [row for row in data_tree if row[3] == 1]
+    leaf_index_by_node = {node_id: leaf_idx for leaf_idx, (node_id, _, _, _) in enumerate(leaf_rows)}
+
+    x_values = [x for x, _ in positions.values()]
+    y_values = [y for _, y in positions.values()]
+    ax.set_xlim(min(x_values) - 0.8, max(x_values) + 0.8)
+    ax.set_ylim(min(y_values) - 2.0, max(y_values) + 0.5)
+
+    for node_id, label, _, node_type in data_tree:
+        x, y = positions[node_id]
+        if node_type == 1:
+            ax.scatter(x, y, s=220, color="#7bc96f", edgecolor="0.25", linewidth=1.0, zorder=3)
+            ax.text(x, y + 0.18, f"Leaf {leaf_index_by_node[node_id]}", ha="center", va="bottom", fontsize=8)
+        else:
+            ax.scatter(x, y, s=320, color="#8db7e8", edgecolor="0.25", linewidth=1.0, zorder=3)
+            ax.text(x, y, str(label), ha="center", va="center", fontsize=8)
+
+    x_min, x_max = ax.get_xlim()
+    y_min, y_max = ax.get_ylim()
+    x_span = max(1e-6, x_max - x_min)
+    y_span = max(1e-6, y_max - y_min)
+    hist_width = min(0.18, 0.85 / max(1, n_leaves))
+    hist_height = min(0.32, max(0.18, n_classes * 0.025))
+
+    for leaf_idx, (node_id, _, _, _) in enumerate(leaf_rows):
+        x, y = positions[node_id]
+        axes_x = (x - x_min) / x_span - hist_width / 2
+        axes_y = (y - y_min) / y_span - hist_height - 0.05
+        inset = ax.inset_axes([axes_x, axes_y, hist_width, hist_height], transform=ax.transAxes)
+        counts = leaf_label_counts[leaf_idx]
+        y_pos = np.arange(n_classes)
+        inset.barh(y_pos, counts, color=class_colors, height=0.75)
+        inset.set_title(f"L{leaf_idx} n={int(counts.sum())}", fontsize=7, pad=1)
+        inset.tick_params(axis="both", labelsize=6, length=2, pad=1)
+        tick_step = max(1, int(np.ceil(n_classes / 12)))
+        tick_positions = y_pos[::tick_step]
+        inset.set_yticks(tick_positions)
+        inset.set_yticklabels(class_labels[::tick_step])
+        inset.set_xlim(0, max(1, int(counts.max())))
+        inset.invert_yaxis()
+        inset.spines["top"].set_visible(False)
+        inset.spines["right"].set_visible(False)
+
+    if use_taxonomy_colors:
+        legend_handles = [
+            Patch(facecolor=taxoclass.colors["power"], label="power"),
+            Patch(facecolor=taxoclass.colors["intermediate"], label="intermediate"),
+            Patch(facecolor=taxoclass.colors["precision"], label="precision"),
+        ]
+        if any(taxoclass.category_for_label(label) == "unknown" for label in class_labels):
+            legend_handles.append(Patch(facecolor=taxoclass.colors["unknown"], label="unknown"))
+        ax.legend(handles=legend_handles, loc="upper right", frameon=False, fontsize=8)
+
+    ax.set_axis_off()
+    ax.set_title("Tree leaf class-label histograms", fontsize=13, pad=12)
+    fig.savefig(save_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+
+
+def save_tree_visualization(data_tree, y_test, y_test_pred, data_name):
+    os.makedirs("assets/", exist_ok=True)
+    class_labels = np.unique(y_test)
+    leaf_label_counts = []
+    for leaf_idx in range(sum(row[3] == 1 for row in data_tree)):
+        indices = np.where(y_test_pred == leaf_idx)[0]
+        counts = np.array([np.sum(y_test[indices] == label) for label in class_labels])
+        leaf_label_counts.append(counts)
+
+    save_path = Path("assets") / "test_tree_leaf_label_histograms.png"
+    use_taxonomy_colors = data_name in {"hograspnet_full_toy", "hograspnet_uniform_toy"}
+    plot_tree_with_leaf_label_histograms(
+        data_tree,
+        leaf_label_counts,
+        class_labels,
+        save_path,
+        use_taxonomy_colors=use_taxonomy_colors,
+    )
+    return save_path
 
 
 def load_config(checkpoint_path):
@@ -146,6 +281,7 @@ def evaluate_test_only(testset, model, device, configs):
         data_name=configs["data"]["data_name"],
         n_ary=configs["training"]["n_ary"],
     )
+    tree_visualization_path = save_tree_visualization(data_tree, y_test, y_test_pred, configs["data"]["data_name"])
 
     print(np.unique(y_test_pred, return_counts=True))
     print("Accuracy:", acc)
@@ -154,6 +290,7 @@ def evaluate_test_only(testset, model, device, configs):
     print("Dendrogram Purity:", dp)
     print("Leaf Purity:", lp)
     print("Digits", np.unique(y_test))
+    print("Tree visualization:", tree_visualization_path)
 
     return {
         "accuracy": acc,
@@ -162,6 +299,7 @@ def evaluate_test_only(testset, model, device, configs):
         "dendrogram_purity": dp,
         "leaf_purity": lp,
         "data_tree": data_tree,
+        "tree_visualization": tree_visualization_path,
     }
 
 
