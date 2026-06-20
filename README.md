@@ -46,3 +46,7 @@ srun --partition=intern --qos=intern_qos --gres=gpu:1 --cpus-per-task=4 --mem=16
 conda activate treevae
 python main.py --config_name=dexgraspnet_toy
 ```
+
+```bash
+conda env export -n treevae --no-builds > treevae_updated.yml
+conda env create -f treevae_updated.yml
