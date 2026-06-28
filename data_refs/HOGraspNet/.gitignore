@@ -1,0 +1,12 @@
+__pycache__/
+data/
+cfg/
+assets/urls/
+thirdparty/mano_v1_2/
+vis/
+
+# Individual files
+logs/
+shell_scripts/
+cfg/
+**/mano_v1_2.zip

@@ -34,6 +34,11 @@ url={https://openreview.net/forum?id=adq0oXb9KM}
 }
 ```
 
+## TreeVAE + Grasp
+* This repository is built upon the following repositories:
+    1. TreeVAE
+    2. HOGraspNet
+
 ## Custom
 ```bash
 srun --partition=intern --qos=intern_qos --gres=gpu:1 --cpus-per-task=4 --mem=16G --time=02:00:00 --pty bash -l
@@ -46,7 +51,3 @@ srun --partition=intern --qos=intern_qos --gres=gpu:1 --cpus-per-task=4 --mem=16
 conda activate treevae
 python main.py --config_name=dexgraspnet_toy
 ```
-
-```bash
-conda env export -n treevae --no-builds > treevae_updated.yml
-conda env create -f treevae_updated.yml

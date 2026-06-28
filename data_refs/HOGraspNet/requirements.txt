@@ -1,0 +1,16 @@
+opencv-python
+tqdm
+wget
+requests
+# chumpy @ git+https://github.com/mattloper/chumpy
+chumpy @ git+https://github.com/hassony2/chumpy.git # thirdparty/manopth/environment.yml에서 가져옴
+torch==2.0.0
+torchvision==0.15.1
+torchaudio==2.0.1
+numpy==1.23.5
+protobuf==4.23.0
+oauthlib
+transforms3d==0.4.2
+six==1.17.0
+plotly==6.7.0
+matplotlib==3.10.8
