@@ -22,9 +22,13 @@ print(model(a).shape)
 
 from models.model import TreeVAE
 from utils.utils import prepare_config
+from pathlib import Path
 import yaml
 
-configs = prepare_config()
+config_path = Path("configs/hograspnet_uniform_toy.yml")
+
+with config_path.open(mode='r') as yamlfile:
+    configs = yaml.safe_load(yamlfile)
 
 model = TreeVAE(**configs['training'])
 
