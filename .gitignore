@@ -144,11 +144,9 @@ Untitled.ipynb
 wandb/*
 run/*
 old*
-dataset/*
 *.png
 data/*
 logs/*
-datasets/*
 
 # cache
 cache/*
