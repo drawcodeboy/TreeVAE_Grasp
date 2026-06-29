@@ -126,7 +126,7 @@ def main():
         eval_configs = deepcopy(resume_configs)
         gen_test = get_gen(testset, eval_configs, validation=True, shuffle=False)
         metrics_calc = Custom_Metrics(device).to(device)
-        validate_one_epoch(gen_test, model, metrics_calc, 0, device, test=True)
+        validate_one_epoch(gen_test, model, metrics_calc, 0, device, test=True, configs=eval_configs)
         wandb.finish(quiet=True)
 
     print("Dry-run resume check passed.")

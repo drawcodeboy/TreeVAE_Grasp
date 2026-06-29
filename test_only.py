@@ -256,9 +256,9 @@ def evaluate_test_only(testset, model, device, configs):
     y_test = get_dataset_labels(testset).numpy()
 
     metrics_calc_test = Custom_Metrics(device).to(device)
-    validate_one_epoch(gen_test, model, metrics_calc_test, 0, device, test=True)
+    validate_one_epoch(gen_test, model, metrics_calc_test, 0, device, test=True, configs=configs)
 
-    node_leaves_test, prob_leaves_test = predict(gen_test, model, device, "node_leaves", "prob_leaves")
+    node_leaves_test, prob_leaves_test = predict(gen_test, model, device, "node_leaves", "prob_leaves", configs=configs)
     y_test_pred = np.squeeze(np.argmax(prob_leaves_test, axis=-1)).numpy()
 
     acc, _ = cluster_acc(y_test, y_test_pred, return_index=True)

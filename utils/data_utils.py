@@ -361,12 +361,12 @@ def get_data(configs):
 		trainset = HOGraspNetMANOContactDataset(root=configs['data']['root'],
 										  		split='train',
 												transform=transform)
-		trainset_eval = HOGraspNetToyDataset(root=configs['data']['root'],
-											 split='train',
-											 transform=transform_eval)
-		testset = HOGraspNetToyDataset(root=configs['data']['root'],
-									   split='test',
-									   transform=transform_eval)
+		trainset_eval = HOGraspNetMANOContactDataset(root=configs['data']['root'],
+											 		 split='train',
+											 		 transform=transform_eval)
+		testset = HOGraspNetMANOContactDataset(root=configs['data']['root'],
+									   		   split='test',
+									   		   transform=transform_eval)
 
 	else:
 		raise NotImplementedError('This dataset is not supported!')
@@ -416,9 +416,14 @@ def get_gen(dataset, configs, validation=False, shuffle=True, smalltree=False, s
 	if configs['training']['augment'] and configs['training']['augmentation_method'] != ['simple'] and not validation:
 		# As one datapoint leads to two samples, we have to half the batch size to retain same number of samples per batch
 		assert batch_size % 2 == 0
-		batch_size = batch_size // 2 
+		batch_size = batch_size // 2
+		collate_fn = (
+			contact_collate_fn
+			if configs['data']['data_name'] == 'hograspnet_contact'
+			else custom_collate_fn
+		)
 		data_gen = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, pin_memory=True,
-							  persistent_workers=True, collate_fn=custom_collate_fn, drop_last=drop_last)
+							  persistent_workers=True, collate_fn=collate_fn, drop_last=drop_last)
 
 	# Call the DataLoader without contrastive learning
 	else:
@@ -444,6 +449,24 @@ def custom_collate_fn(batch):
 	batch[0] = batch[0].transpose(1, 0).reshape(-1,*batch[0].shape[2:])
 	batch[1] = batch[1].repeat(2)
 	return batch
+
+
+def contact_collate_fn(batch):
+	"""Flatten contrastive views and duplicate their contact maps and labels."""
+	(inputs, labels) = torch.utils.data.default_collate(batch)
+	mano_vertices, contact_map = inputs
+
+	# (B, V, 3, N) -> (V * B, 3, N), keeping the existing view-major order.
+	num_views = mano_vertices.shape[1]
+	mano_vertices = mano_vertices.transpose(1, 0).reshape(
+		-1, *mano_vertices.shape[2:]
+	)
+	contact_map = contact_map.repeat(
+		(num_views,) + (1,) * (contact_map.dim() - 1)
+	)
+	labels = labels.repeat(num_views)
+
+	return (mano_vertices, contact_map), labels
 
 
 class ContrastiveTransformations(object):

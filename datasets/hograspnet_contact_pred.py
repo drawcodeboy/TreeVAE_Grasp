@@ -5,6 +5,7 @@ from pathlib import Path
 import pickle
 import os
 import numpy as np
+import torch
 
 from torch.utils.data import Dataset
 from einops import rearrange
@@ -43,12 +44,12 @@ class HOGraspNetMANOContactDataset(Dataset):
         return len(self.data_li)
     
     def __getitem__(self, idx):
-        sample_path = self.data_li[idx]
+        sample_path, taxo_label = self.data_li[idx]
         data_dict = np.load(sample_path)
 
         mano_vertices = data_dict['mano_vertices']
         contact_map = data_dict['contact_map']
-        taxo_label = int(data_dict['taxo_id'])
+        taxo_label = int(taxo_label)
 
         # Normalization
         # Location
@@ -56,6 +57,10 @@ class HOGraspNetMANOContactDataset(Dataset):
         mano_vertices = mano_vertices - root[None, :]
         # Scale
         mano_vertices = mano_vertices / self.MANO_GLOBAL_SCALE
+
+        # To Tensor
+        mano_vertices = torch.tensor(mano_vertices, dtype=torch.float32)
+        contact_map = torch.tensor(contact_map, dtype=torch.float32)
 
         if self.transform is not None:
             mano_vertices = self.transform(mano_vertices)
@@ -256,8 +261,14 @@ class HOGraspNetMANOContactDataset(Dataset):
         if set(train_indices) & set(test_indices):
             raise AssertionError("Train/test index overlap found")
 
-        train_paths = [self.data_li[index] for index in train_indices]
-        test_paths = [self.data_li[index] for index in test_indices]
+        train_paths = [
+            [self.data_li[index], metadata_by_index[index]["label"]]
+            for index in train_indices
+        ]
+        test_paths = [
+            [self.data_li[index], metadata_by_index[index]["label"]]
+            for index in test_indices
+        ]
 
         self.train_indices = train_paths
         self.test_indices = test_paths

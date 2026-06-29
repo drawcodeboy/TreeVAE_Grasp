@@ -14,8 +14,22 @@ from utils.utils import cluster_acc
 from torch.utils.data import TensorDataset
 
 
+def unpack_contact_batch(batch, device):
+    """Move a nested HOGraspNet contact batch to the target device."""
+    (mano_vertices, contact_map), taxonomy_labels = batch
+    inputs = (mano_vertices.to(device), contact_map.to(device))
+    return inputs, taxonomy_labels.to(device)
+
+
+def _is_hograspnet_contact(configs):
+    return (
+        configs is not None
+        and configs.get('data', {}).get('data_name') == 'hograspnet_contact'
+    )
+
+
 def train_one_epoch(train_loader, model, optimizer, metrics_calc, epoch_idx, device, train_small_tree=False,
-                    small_model=None, ind_leaf=None):
+                    small_model=None, ind_leaf=None, configs=None):
     """
     Train TreeVAE or SmallTreeVAE model for one epoch.
 
@@ -55,8 +69,11 @@ def train_one_epoch(train_loader, model, optimizer, metrics_calc, epoch_idx, dev
     metrics_calc.reset()
 
     for batch_idx, batch in enumerate(tqdm(train_loader)):
-        inputs, labels = batch
-        inputs, labels = inputs.to(device), labels.to(device)
+        if _is_hograspnet_contact(configs):
+            inputs, labels = unpack_contact_batch(batch, device)
+        else:
+            inputs, labels = batch
+            inputs, labels = inputs.to(device), labels.to(device)
         # Zero your gradients for every batch
         optimizer.zero_grad()
 
@@ -109,7 +126,7 @@ def train_one_epoch(train_loader, model, optimizer, metrics_calc, epoch_idx, dev
 
 
 def validate_one_epoch(test_loader, model, metrics_calc, epoch_idx, device, test=False, train_small_tree=False,
-                       small_model=None, ind_leaf=None):
+                       small_model=None, ind_leaf=None, configs=None):
     model.eval()
     if train_small_tree:
         small_model.eval()
@@ -123,8 +140,11 @@ def validate_one_epoch(test_loader, model, metrics_calc, epoch_idx, device, test
 
     with torch.no_grad():
         for batch_idx, batch in enumerate(tqdm(test_loader)):
-            inputs, labels = batch
-            inputs, labels = inputs.to(device), labels.to(device)
+            if _is_hograspnet_contact(configs):
+                inputs, labels = unpack_contact_batch(batch, device)
+            else:
+                inputs, labels = batch
+                inputs, labels = inputs.to(device), labels.to(device)
             # Make predictions for this batch
             if train_small_tree:
                 # Sass of full tree
@@ -171,7 +191,7 @@ def validate_one_epoch(test_loader, model, metrics_calc, epoch_idx, device, test
     return
 
 
-def predict(loader, model, device, *return_flags):
+def predict(loader, model, device, *return_flags, configs=None):
     model.eval()
 
     if 'bottom_up' in return_flags:
@@ -194,8 +214,12 @@ def predict(loader, model, device, *return_flags):
     }
 
     with torch.no_grad():
-        for batch_idx, (inputs, labels) in enumerate(tqdm(loader)):
-            inputs = inputs.to(device)
+        for batch_idx, batch in enumerate(tqdm(loader)):
+            if _is_hograspnet_contact(configs):
+                inputs, labels = unpack_contact_batch(batch, device)
+            else:
+                inputs, labels = batch
+                inputs = inputs.to(device)
             # Make predictions for this batch
             outputs = model(inputs)
 

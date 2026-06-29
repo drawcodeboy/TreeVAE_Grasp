@@ -156,8 +156,8 @@ def run_tree(trainset, trainset_eval, testset, device, configs, resume_checkpoin
 	
 	# Training the initial tree
 	for epoch in range(start_epoch, configs['training']['num_epochs']):  # loop over the dataset multiple times
-		train_one_epoch(gen_train, model, optimizer, metrics_calc_train, epoch, device)
-		validate_one_epoch(gen_test, model, metrics_calc_val, epoch, device)
+		train_one_epoch(gen_train, model, optimizer, metrics_calc_train, epoch, device, configs=configs)
+		validate_one_epoch(gen_test, model, metrics_calc_val, epoch, device, configs=configs)
 		lr_scheduler.step()
 		alpha_scheduler.on_epoch_end(epoch)
 		global_step += len(gen_train)
@@ -236,8 +236,8 @@ def run_tree(trainset, trainset_eval, testset, device, configs, resume_checkpoin
 				# Training the initial split
 				print('\nTree intermediate finetuning\n')
 				for epoch in range(intermediate_start_epoch, configs['training']['num_epochs_intermediate_fulltrain']):
-					train_one_epoch(gen_train, model, optimizer, metrics_calc_train, epoch, device)
-					validate_one_epoch(gen_test, model, metrics_calc_val, epoch, device)
+					train_one_epoch(gen_train, model, optimizer, metrics_calc_train, epoch, device, configs=configs)
+					validate_one_epoch(gen_test, model, metrics_calc_val, epoch, device, configs=configs)
 					lr_scheduler.step()
 					alpha_scheduler.on_epoch_end(epoch)
 					global_step += len(gen_train)
@@ -283,13 +283,13 @@ def run_tree(trainset, trainset_eval, testset, device, configs, resume_checkpoin
 					f"checkpoint={resume_checkpoint['selected_leaf_index']}, restored={ind_leaf}"
 				)
 			n_effective_leaves = resume_checkpoint['n_effective_leaves']
-			node_leaves_train = predict(gen_train_eval, model, device, 'node_leaves')
-			node_leaves_test = predict(gen_test, model, device, 'node_leaves')
+			node_leaves_train = predict(gen_train_eval, model, device, 'node_leaves', configs=configs)
+			node_leaves_test = predict(gen_test, model, device, 'node_leaves', configs=configs)
 			print('\nResuming smalltree training: Leaf %d at depth %d\n' % (ind_leaf, leaf['depth']))
 		else:
 			# extract information of leaves
-			node_leaves_train = predict(gen_train_eval, model, device, 'node_leaves')
-			node_leaves_test = predict(gen_test, model, device, 'node_leaves')
+			node_leaves_train = predict(gen_train_eval, model, device, 'node_leaves', configs=configs)
+			node_leaves_test = predict(gen_test, model, device, 'node_leaves', configs=configs)
 
 			# compute which leaf to grow and split
 			ind_leaf, leaf, n_effective_leaves = compute_growing_leaf(gen_train_eval, model, node_leaves_train, max_depth,
@@ -337,9 +337,9 @@ def run_tree(trainset, trainset_eval, testset, device, configs, resume_checkpoin
 		# Training the smalltree subsplit
 		for epoch in range(smalltree_start_epoch, configs['training']['num_epochs_smalltree']):
 			train_one_epoch(gen_train_small, model, optimizer, metrics_calc_train, epoch, device, train_small_tree=True,
-							small_model=small_model, ind_leaf=ind_leaf)
+							small_model=small_model, ind_leaf=ind_leaf, configs=configs)
 			validate_one_epoch(gen_test_small, model, metrics_calc_val, epoch, device, train_small_tree=True,
-							   small_model=small_model, ind_leaf=ind_leaf)
+							   small_model=small_model, ind_leaf=ind_leaf, configs=configs)
 			lr_scheduler.step()
 			alpha_scheduler.on_epoch_end(epoch)
 			global_step += len(gen_train_small)
@@ -406,7 +406,7 @@ def run_tree(trainset, trainset_eval, testset, device, configs, resume_checkpoin
 		leaf_increment = configs['training']['n_ary'] - 1
 		if n_effective_leaves + leaf_increment >= configs['training']['num_clusters_tree']:
 			# node_leaves_train : leaf 별 정보를 담은 list, 각 원소는 dict -> {'prob': sample-wise probability of reaching the node, 'z_sample': sampled leaf embedding}
-			node_leaves_train = predict(gen_train_eval, model, device, 'node_leaves')
+			node_leaves_train = predict(gen_train_eval, model, device, 'node_leaves', configs=configs)
 			_, _, max_growth = compute_growing_leaf(gen_train_eval, model, node_leaves_train, max_depth,
 													configs['training']['batch_size'],
 													max_leaves=configs['training']['num_clusters_tree'], check_max=True)
@@ -456,7 +456,7 @@ def run_tree(trainset, trainset_eval, testset, device, configs, resume_checkpoin
 		else:
 			print("Pruning was already completed in checkpoint")
 	elif prune:
-		node_leaves_test, prob_leaves_test = predict(gen_test, model, device, 'node_leaves', 'prob_leaves')
+		node_leaves_test, prob_leaves_test = predict(gen_test, model, device, 'node_leaves', 'prob_leaves', configs=configs)
 		if len(node_leaves_test)<2:
 			prune = False
 		else:
@@ -499,7 +499,7 @@ def run_tree(trainset, trainset_eval, testset, device, configs, resume_checkpoin
 	# prune the tree
 	while prune:
 		# check pruning conditions
-		node_leaves_train = predict(gen_train_eval, model, device, 'node_leaves')
+		node_leaves_train = predict(gen_train_eval, model, device, 'node_leaves', configs=configs)
 		ind_leaf, leaf = compute_pruning_leaf(model, node_leaves_train)
 
 		if ind_leaf == None:
@@ -618,8 +618,8 @@ def run_tree(trainset, trainset_eval, testset, device, configs, resume_checkpoin
 	# finetune the full tree
 	print('\nTree final finetuning\n')
 	for epoch in range(final_start_epoch, configs['training']['num_epochs_finetuning']):  # loop over the dataset multiple times
-		train_one_epoch(gen_train, model, optimizer, metrics_calc_train, epoch, device)
-		validate_one_epoch(gen_test, model, metrics_calc_val, epoch, device)
+		train_one_epoch(gen_train, model, optimizer, metrics_calc_train, epoch, device, configs=configs)
+		validate_one_epoch(gen_test, model, metrics_calc_val, epoch, device, configs=configs)
 		lr_scheduler.step()
 		alpha_scheduler.on_epoch_end(epoch)
 		global_step += len(gen_train)

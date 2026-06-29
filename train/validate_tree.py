@@ -41,7 +41,7 @@ def val_tree(trainset, testset, model, device, experiment_path, configs):
     gen_train_eval = get_gen(trainset, configs, validation=True, shuffle=False)
     y_train = get_dataset_labels(trainset).numpy()
     # compute the leaf probabilities
-    prob_leaves_train = predict(gen_train_eval, model, device, 'prob_leaves')
+    prob_leaves_train = predict(gen_train_eval, model, device, 'prob_leaves', configs=configs)
     _ = gc.collect()
     # compute the predicted cluster
     y_train_pred = np.squeeze(np.argmax(prob_leaves_train, axis=-1)).numpy()
@@ -63,10 +63,10 @@ def val_tree(trainset, testset, model, device, experiment_path, configs):
     y_test = get_dataset_labels(testset).numpy()
     # compute one validation pass through the test set to log losses
     metrics_calc_test = Custom_Metrics(device)
-    validate_one_epoch(gen_test, model, metrics_calc_test, 0, device, test=True)
+    validate_one_epoch(gen_test, model, metrics_calc_test, 0, device, test=True, configs=configs)
     _ = gc.collect()
     # predict the leaf probabilities and the leaves
-    node_leaves_test, prob_leaves_test = predict(gen_test, model, device, 'node_leaves', 'prob_leaves')
+    node_leaves_test, prob_leaves_test = predict(gen_test, model, device, 'node_leaves', 'prob_leaves', configs=configs)
     _ = gc.collect()
     # compute the predicted cluster
     y_test_pred = np.squeeze(np.argmax(prob_leaves_test, axis=-1)).numpy()
@@ -145,14 +145,14 @@ def compute_likelihood(testset, model, device, configs):
     if configs['training']['activation'] == 'sigmoid':
         elbo = np.zeros((len(testset), ESTIMATION_SAMPLES))
         for j in tqdm(range(ESTIMATION_SAMPLES)):
-            elbo[:, j] = predict(gen_test, model, device, 'elbo')
+            elbo[:, j] = predict(gen_test, model, device, 'elbo', configs=configs)
             _ = gc.collect()
         elbo_new = elbo[:, :ESTIMATION_SAMPLES]
         log_likel = np.log(1 / ESTIMATION_SAMPLES) + scipy.special.logsumexp(-elbo_new, axis=1)
         marginal_log_likelihood = np.sum(log_likel) / len(testset)
         wandb.log({"test log-likelihood": marginal_log_likelihood})
         print("Test log-likelihood", marginal_log_likelihood)
-        output_elbo, output_rec_loss = predict(gen_test, model, device, 'elbo', 'rec_loss')
+        output_elbo, output_rec_loss = predict(gen_test, model, device, 'elbo', 'rec_loss', configs=configs)
         print('Test ELBO:', -torch.mean(output_elbo))
         print('Test Reconstruction Loss:', torch.mean(output_rec_loss))
 
@@ -165,7 +165,7 @@ def compute_likelihood(testset, model, device, configs):
         # (in 0,255), to go from the discrete to the assumed continuous inputs
         #    x_test_elbo = x_test * 255
         #    x_test_elbo = (x_test_elbo + tfd.Uniform().sample(x_test_elbo.shape)) / 256
-        output_elbo, output_rec_loss = predict(gen_test, model, device, 'elbo', 'rec_loss')
+        output_elbo, output_rec_loss = predict(gen_test, model, device, 'elbo', 'rec_loss', configs=configs)
         nelbo = torch.mean(output_elbo)
         nelbo_bpd = nelbo / (torch.log(torch.tensor(2)) * configs['training']['inp_shape']) + 8  # Add 8 to account normalizing of inputs
         model.loss = old_loss
@@ -173,7 +173,7 @@ def compute_likelihood(testset, model, device, configs):
         for j in range(ESTIMATION_SAMPLES):
             # x_test_elbo = x_test * 255
             # x_test_elbo = (x_test_elbo + tfd.Uniform().sample(x_test_elbo.shape)) / 256
-            output_elbo = predict(gen_test, model, device, 'elbo')
+            output_elbo = predict(gen_test, model, device, 'elbo', configs=configs)
             elbo[:, j] = output_elbo
         # Change to bpd
         elbo_new = elbo[:, :ESTIMATION_SAMPLES]
@@ -190,14 +190,14 @@ def compute_likelihood(testset, model, device, configs):
     elif configs['training']['activation'] == 'chamfer':
         # Chamfer distance is a point-set reconstruction cost, not a normalized likelihood model.
         # Report the same importance-weighted ELBO objective used by training without image bpd conversion.
-        output_elbo, output_rec_loss = predict(gen_test, model, device, 'elbo', 'rec_loss')
+        output_elbo, output_rec_loss = predict(gen_test, model, device, 'elbo', 'rec_loss', configs=configs)
         mean_elbo = torch.mean(output_elbo).item()
         mean_rec_loss = torch.mean(output_rec_loss).item()
 
         # Row: test set length, Col: estimation samples
         elbo = np.zeros((len(testset), ESTIMATION_SAMPLES))
         for j in range(ESTIMATION_SAMPLES):
-            elbo[:, j] = predict(gen_test, model, device, 'elbo')
+            elbo[:, j] = predict(gen_test, model, device, 'elbo', configs=configs)
             _ = gc.collect()
 
         # Importance sampling
