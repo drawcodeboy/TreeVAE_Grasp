@@ -4,7 +4,8 @@ Utility functions for data loading.
 import os
 from datasets.dexgraspnet_toy import DexGraspNetToyDataset
 from datasets.hograspnet_toy import HOGraspNetToyDataset
-from datasets.augmentation import RandomYawRotation, RandomJitter
+from datasets.hograspnet_contact_pred import HOGraspNetMANOContactDataset
+from datasets.augmentation_pc import RandomYawRotation, RandomJitter
 import torch
 import torchvision
 import torchvision.transforms as T
@@ -339,6 +340,33 @@ def get_data(configs):
 		# trainset = torch.utils.data.Subset(trainset, range(debug_count))
 		# trainset_eval = torch.utils.data.Subset(trainset_eval, range(debug_count))
 		# testset = torch.utils.data.Subset(testset, range(debug_count))
+
+	elif data_name in ['hograspnet_contact']:
+		reset_random_seeds(configs['globals']['seed'])
+
+		transform_eval = T.Compose([])
+
+		if augment is True:
+			aug_transforms = T.Compose([
+				RandomYawRotation(),
+				RandomJitter(),
+			])
+			if augmentation_method == ['simple']:
+				transform = aug_transforms
+			else:
+				transform = ContrastiveTransformations(aug_transforms, n_views=2)
+		else:
+			transform = transform_eval
+
+		trainset = HOGraspNetMANOContactDataset(root=configs['data']['root'],
+										  		split='train',
+												transform=transform)
+		trainset_eval = HOGraspNetToyDataset(root=configs['data']['root'],
+											 split='train',
+											 transform=transform_eval)
+		testset = HOGraspNetToyDataset(root=configs['data']['root'],
+									   split='test',
+									   transform=transform_eval)
 
 	else:
 		raise NotImplementedError('This dataset is not supported!')

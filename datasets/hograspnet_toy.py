@@ -16,7 +16,7 @@ import torchvision.transforms as T
 import random
 import pickle
 
-from datasets.augmentation import RandomYawRotation, RandomJitter
+from datasets.augmentation_pc import RandomYawRotation, RandomJitter
 
 class HOGraspNetToyDataset(Dataset):
     def __init__(self,

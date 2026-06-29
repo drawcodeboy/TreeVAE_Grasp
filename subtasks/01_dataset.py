@@ -4,7 +4,7 @@ sys.path.append(os.getcwd())
 
 def main():
     from datasets.hograspnet_toy import HOGraspNetToyDataset
-    from datasets.augmentation import RandomYawRotation, RandomJitter
+    from datasets.augmentation_pc import RandomYawRotation, RandomJitter
     from utils.data_utils import ContrastiveTransformations, custom_collate_fn
     import torchvision.transforms as T
     from torch.utils.data import DataLoader

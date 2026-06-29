@@ -148,6 +148,7 @@ old*
 data/*
 logs/*
 
-# cache
+# Custom(Dawoon Kwon)
 cache/*
 data/
+assets/
