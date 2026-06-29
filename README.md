@@ -17,11 +17,6 @@ conda activate treevae
 python main.py --config_name=dexgraspnet_toy
 ```
 
-## HOGraspNet
-* 데이터셋 관련 처리를 할 경우 <code>data_refs/HOGraspNet</code>에 들어가서 독립적인 환경을 setup하고 수행할 것
-* Refer <code>data_refs/README.md</code>
-
-
 # Tree Variational Autoencoders
 This is the PyTorch repository for the NeurIPS 2023 Spotlight Publication (https://neurips.cc/virtual/2023/poster/71188).
 
