@@ -6,8 +6,9 @@ import torch.nn as nn
 import torch.distributions as td
 from models.networks import get_decoder, MLP, Router, Dense
 from models.networks_pc import get_decoder_pc
+from models.CoMA.model import get_decoder_coma
 from utils.model_utils import compute_posterior
-from models.losses import loss_reconstruction_binary, loss_reconstruction_mse, loss_reconstruction_chamfer
+from models.losses import loss_reconstruction_binary, loss_reconstruction_mse, loss_reconstruction_mae, loss_reconstruction_chamfer
 from utils.training_utils import calc_aug_loss, calc_aug_loss_for_cat
 
 class SmallTreeVAE(nn.Module):
@@ -71,10 +72,12 @@ class SmallTreeVAE(nn.Module):
             self.loss = loss_reconstruction_binary
         elif self.activation == "mse":
             self.loss = loss_reconstruction_mse
+        elif self.activation == "mae":
+            self.loss = loss_reconstruction_mae
         elif self.activation == 'chamfer':
             self.loss = loss_reconstruction_chamfer
         else:
-            raise NotImplementedError
+            raise Exception("Check the activation in SmallTreeVAE class")
         # KL-annealing weight initialization
         self.alpha=self.kwargs['kl_start'] 
 
@@ -90,6 +93,7 @@ class SmallTreeVAE(nn.Module):
         self.augment = self.kwargs['augment']
         self.augmentation_method = self.kwargs['augmentation_method']
         self.aug_decisions_weight = self.kwargs['aug_decisions_weight']
+        self.modal = self.kwargs['modal']
 
         self.denses = nn.ModuleList([Dense(self.hidden_layer[1], self.encoded_size[1]) for _ in range(self.n_ary)])
         self.transformations = nn.ModuleList([MLP(self.encoded_size[0], self.encoded_size[1], self.hidden_layer[0]) for _ in range(self.n_ary)])
@@ -99,8 +103,30 @@ class SmallTreeVAE(nn.Module):
         self.decoders = nn.ModuleList([get_decoder(architecture=self.kwargs['encoder'], input_shape=self.encoded_size[1],
                                                   output_shape=self.inp_shape, activation=self.activation) for _ in range(self.n_ary)])
         '''
-        self.decoders = nn.ModuleList([get_decoder_pc(architecture=self.kwargs['decoder']['architecture'], 
-                                                input_shape=encoded_size_gen[-1]) for _ in range(self.n_ary)])
+        if self.modal == 'pointcloud':
+            self.decoders = nn.ModuleList([
+                get_decoder_pc(
+                    architecture=self.kwargs['decoder']['architecture'],
+                    input_shape=encoded_size_gen[-1],
+                )
+                for _ in range(self.n_ary)
+            ])
+        elif self.modal == 'mesh':
+            self.decoders = nn.ModuleList([
+                get_decoder_coma(
+                    architecture=self.kwargs['decoder']['architecture'],
+                    input_shape=encoded_size_gen[-1],
+                    num_node_features=self.kwargs['encoder']['num_node_features'],
+                    num_conv_filters=self.kwargs['encoder']['num_conv_filters'],
+                    polygon_order=self.kwargs['encoder']['polygon_order'],
+                    upsample_matrices=self.kwargs['encoder']['U_t'],
+                    adjacency_matrices=self.kwargs['encoder']['A_t'],
+                    num_nodes=self.kwargs['encoder']['num_nodes_mesh'],
+                )
+                for _ in range(self.n_ary)
+            ])
+        else:
+            raise ValueError(f"Unsupported modal for SmallTreeVAE: {self.modal!r}")
     def forward(self, x, z_parent, p, bottom_up):
         """
         Forward pass of the SmallTreeVAE model.

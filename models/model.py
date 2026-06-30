@@ -7,7 +7,9 @@ import torch.distributions as td
 from utils.model_utils import construct_tree, compute_posterior
 from models.networks import get_encoder, get_decoder, MLP, Router, Dense
 from models.networks_pc import get_encoder_pc, get_decoder_pc
-from models.losses import loss_reconstruction_binary, loss_reconstruction_mse, loss_reconstruction_chamfer
+from models.CoMA.model import get_encoder_coma, get_decoder_coma
+from models.CoMA import mesh_operations
+from models.losses import loss_reconstruction_binary, loss_reconstruction_mse, loss_reconstruction_mae, loss_reconstruction_chamfer
 from utils.model_utils import return_list_tree
 from utils.training_utils import calc_aug_loss, calc_aug_loss_for_cat
 
@@ -106,6 +108,8 @@ class TreeVAE(nn.Module):
             self.loss = loss_reconstruction_binary
         elif self.activation == "mse":
             self.loss = loss_reconstruction_mse
+        elif self.activation in ['mae', 'l1']:
+            self.loss = loss_reconstruction_mae
         elif self.activation == "chamfer": # For point cloud
             self.loss = loss_reconstruction_chamfer
         else:
@@ -127,6 +131,7 @@ class TreeVAE(nn.Module):
         self.return_x = torch.tensor([False])
         self.return_bottomup = torch.tensor([False])
         self.return_elbo = torch.tensor([False])
+        self.modal = self.kwargs['modal']
 
         # bottom up: the inference chain that from input computes the d units till the root
         # 각 depth에 대한 d_H를 추출하는 과정을 encoder가 맡아서 한다.
@@ -143,9 +148,23 @@ class TreeVAE(nn.Module):
             encoder = get_encoder(architecture=self.kwargs['encoder'], encoded_size=self.hidden_layers[0],
                                 x_shape=self.inp_shape)   
         '''
-        encoder = get_encoder_pc(architecture=self.kwargs['encoder']['architecture'], 
-                                 encoded_size=self.hidden_layers[0], 
-                                 num_points=self.kwargs['encoder']['num_points'])
+
+        encoder = None
+        if self.modal == 'pointcloud':
+            encoder = get_encoder_pc(architecture=self.kwargs['encoder']['architecture'],
+                                    encoded_size=self.hidden_layers[0],
+                                    num_points=self.kwargs['encoder']['num_points'])
+        elif self.modal == 'mesh':
+            # 여기 arguments 할당
+            encoder = get_encoder_coma(architecture=self.kwargs['encoder']['architecture'],
+                                       encoded_size=self.hidden_layers[0],
+                                       num_node_features=self.kwargs['encoder']['num_node_features'],
+                                       num_conv_filters=self.kwargs['encoder']['num_conv_filters'],
+                                       polygon_order=self.kwargs['encoder']['polygon_order'],
+                                       downsample_matrices=self.kwargs['encoder']['D_t'],
+                                       adjacency_matrices=self.kwargs['encoder']['A_t'],
+                                       num_nodes=self.kwargs['encoder']['num_nodes_mesh']
+                                       )
 
         self.bottom_up = nn.ModuleList([encoder])
         for i in range(1, len(self.hidden_layers)):
@@ -238,9 +257,24 @@ class TreeVAE(nn.Module):
             self.decoders.append(get_decoder(architecture=self.kwargs['encoder'], input_shape=encoded_size_gen[-1], 
                                             output_shape=self.inp_shape, activation=self.activation))
         '''
-        for _ in range(self.n_ary ** (self.depth)):
-            self.decoders.append(get_decoder_pc(architecture=self.kwargs['decoder']['architecture'], 
-                                                input_shape=encoded_size_gen[-1]))
+        if self.modal == 'pointcloud':
+            for _ in range(self.n_ary ** (self.depth)):
+                self.decoders.append(get_decoder_pc(architecture=self.kwargs['decoder']['architecture'],
+                                                    input_shape=encoded_size_gen[-1]))
+        elif self.modal == 'mesh':
+            for _ in range(self.n_ary ** (self.depth)):
+                self.decoders.append(
+                    get_decoder_coma(
+                        architecture=self.kwargs['decoder']['architecture'],
+                        input_shape=encoded_size_gen[-1],
+                        num_node_features=self.kwargs['encoder']['num_node_features'],
+                        num_conv_filters=self.kwargs['encoder']['num_conv_filters'],
+                        polygon_order=self.kwargs['encoder']['polygon_order'],
+                        upsample_matrices=self.kwargs['encoder']['U_t'],
+                        adjacency_matrices=self.kwargs['encoder']['A_t'],
+                        num_nodes=self.kwargs['encoder']['num_nodes_mesh'],
+                    )
+                )
 
         # construct the tree
         self.tree = construct_tree(transformations=self.transformations, routers=self.decisions,
@@ -279,7 +313,10 @@ class TreeVAE(nn.Module):
         emb_contr = []
 
         for i in range(0, len(self.hidden_layers)):
-            d, _, _ = self.bottom_up[i](d)
+            if i == 0:
+                d = self.bottom_up[i](d)
+            else:
+                d, _, _ = self.bottom_up[i](d)
             # store bottom-up embeddings for top-down
             encoders.append(d)
 
@@ -594,7 +631,7 @@ class TreeVAE(nn.Module):
         encoders = []
 
         for i in range(0, len(self.hidden_layers)):
-            d, _, _ = self.bottom_up[i](d)
+            d = self.bottom_up[i](d)
             # store the bottom-up layers for the top down computation
             encoders.append(d)
 

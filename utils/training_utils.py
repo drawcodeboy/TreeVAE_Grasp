@@ -25,11 +25,12 @@ def _is_hograspnet_contact(configs):
     return (
         configs is not None
         and configs.get('data', {}).get('data_name') == 'hograspnet_contact'
+        and configs.get('data', {}).get('mode') == 'prediction'
     )
 
 
 def train_one_epoch(train_loader, model, optimizer, metrics_calc, epoch_idx, device, train_small_tree=False,
-                    small_model=None, ind_leaf=None, configs=None):
+                    small_model=None, ind_leaf=None, configs=None, wandb_step=None):
     """
     Train TreeVAE or SmallTreeVAE model for one epoch.
 
@@ -115,7 +116,15 @@ def train_one_epoch(train_loader, model, optimizer, metrics_calc, epoch_idx, dev
     # Calculate and log metrics
     metrics = metrics_calc.compute()
     metrics['alpha'] = alpha
-    wandb.log({'train': metrics})
+    if wandb_step is None:
+        wandb.log({'train': metrics})
+    else:
+        log_data = {
+            f'train/{key}': value
+            for key, value in metrics.items()
+        }
+        log_data['wandb_epoch_step'] = wandb_step
+        wandb.log(log_data, commit=False)
     prints = f"Epoch {epoch_idx}, Train     : "
     for key, value in metrics.items():
         prints += f"{key}: {value:.3f} "
@@ -126,7 +135,7 @@ def train_one_epoch(train_loader, model, optimizer, metrics_calc, epoch_idx, dev
 
 
 def validate_one_epoch(test_loader, model, metrics_calc, epoch_idx, device, test=False, train_small_tree=False,
-                       small_model=None, ind_leaf=None, configs=None):
+                       small_model=None, ind_leaf=None, configs=None, wandb_step=None):
     model.eval()
     if train_small_tree:
         small_model.eval()
@@ -178,11 +187,22 @@ def validate_one_epoch(test_loader, model, metrics_calc, epoch_idx, device, test
     # Calculate and log metrics
     metrics = metrics_calc.compute()
     if not test:
-        wandb.log({'validation': metrics})
+        log_data = {'validation': metrics}
         prints = f"Epoch {epoch_idx}, Validation: "
     else:
-        wandb.log({'test': metrics})
+        log_data = {'test': metrics}
         prints = f"Test: "
+
+    if wandb_step is None:
+        wandb.log(log_data)
+    else:
+        metric_group = 'test' if test else 'validation'
+        epoch_log_data = {
+            f'{metric_group}/{key}': value
+            for key, value in metrics.items()
+        }
+        epoch_log_data['wandb_epoch_step'] = wandb_step
+        wandb.log(epoch_log_data, commit=True)
     for key, value in metrics.items():
         prints += f"{key}: {value:.3f} "
     print(prints)
@@ -439,7 +459,9 @@ def calc_aug_loss_for_cat(prob_parent, prob_router, augmentation_methods, emb_co
 
 def get_ind_small_tree(node_leaves, n_effective_leaves):
     prob = node_leaves['prob']
-    ind = np.where(prob >= min(1 / n_effective_leaves, 0.5))[0]  # To circumvent problems with n_effective_leaves==1
+    # 모니터링을 위해 원래 0.5였던 값을 k-ary로 확장함에 따라 낮춤
+    threshold_prob = 0.3
+    ind = np.where(prob >= min(1 / n_effective_leaves, threshold_prob))[0]  # To circumvent problems with n_effective_leaves==1
     return ind
 
 

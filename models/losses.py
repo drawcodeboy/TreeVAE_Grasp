@@ -22,6 +22,15 @@ def loss_reconstruction_mse(x, x_decoded_mean, weights):
                         for i in range(len(x_decoded_mean))], dim=-1), dim=-1)
     return loss
 
+def loss_reconstruction_mae(x, x_decoded_mean, weights):
+    x = torch.flatten(x, start_dim=1)
+    x_decoded_mean = [torch.flatten(decoded_leaf, start_dim=1) for decoded_leaf in x_decoded_mean]
+    # recon loss가 너무 높아서 임시 방편 -> sum to mean
+    loss = torch.sum(
+        torch.stack([weights[i] * F.l1_loss(input = x_decoded_mean[i], target = x, reduction='none').mean(dim=-1)
+                        for i in range(len(x_decoded_mean))], dim=-1), dim=-1)
+    return loss
+
 def loss_reconstruction_cov_mse_eval(x, x_decoded_mean, weights):
     # NOTE Only use for evaluation purposes, as the clamping stops gradient flow
     # NOTE WE ASSUME IDENTITY MATRIX BECAUSE WE ASSUME THIS IMPLICITLY WHEN ONLY OPTIMIZING MSE

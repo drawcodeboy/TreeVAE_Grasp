@@ -19,7 +19,8 @@ class HOGraspNetMANOContactDataset(Dataset):
         self,
         root="/workspace/dwkwon/HOGraspNet/processed_data/hand_pose_plus_mano_contact",
         split='train',
-        transform=None
+        transform=None,
+        mode='recon' # recon or prediction
     ):
         super().__init__()
         self.root = Path(root)
@@ -39,6 +40,7 @@ class HOGraspNetMANOContactDataset(Dataset):
 
         self.MANO_GLOBAL_SCALE = 5.633076949477
         self.transform = transform
+        self.mode = mode
 
     def __len__(self):
         return len(self.data_li)
@@ -67,10 +69,22 @@ class HOGraspNetMANOContactDataset(Dataset):
 
         if mano_vertices.dim() == 2: # Default Augmentations (w/o ContrastiveTransformations)
             mano_vertices = rearrange(mano_vertices, 'n c -> c n')
+            if self.mode == 'prediction':
+                pass # TODO: implementation here
+            elif self.mode == 'recon':
+                x = torch.cat([mano_vertices, contact_map.unsqueeze(0)], dim=0)
+                x = rearrange(x, 'c n -> n c')
+                return x, taxo_label
         elif mano_vertices.dim() == 3: # ContrastiveTransformations
             mano_vertices = rearrange(mano_vertices, 'b n c -> b c n')
-        
-        return (mano_vertices, contact_map), taxo_label
+            if self.mode == 'prediction':
+                # TODO: implementation here
+                pass
+            elif self.mode == 'recon':
+                contact_map = contact_map.unsqueeze(0).expand(mano_vertices.size(0), -1, -1)
+                x = torch.cat([mano_vertices, contact_map], dim=1) # (2, 4, 778)
+                x = rearrange(x, 'b c n -> b n c')
+                return x, taxo_label
 
     def _parse_index_metadata(self):
         """Return index-to-subject/taxonomy metadata parsed from filenames."""
@@ -294,10 +308,13 @@ class HOGraspNetMANOContactDataset(Dataset):
         return train_paths, test_paths
 
 if __name__ == '__main__':
-    train_ds = HOGraspNetMANOContactDataset(split='train')
-    (vertices, contact_map), label = train_ds[0]
-    print(vertices.shape)
-    print(contact_map.shape)
+    train_ds = HOGraspNetMANOContactDataset(split='train', 
+                                            mode='recon')
+    # (vertices, contact_map), label = train_ds[0]
+    # print(vertices.shape)
+    # print(contact_map.shape)
+    x, label = train_ds[0]
+    print(x.shape)
     # print(np.max(vertices), np.min(vertices))
     # print(np.max(contact_map), np.min(contact_map))
 

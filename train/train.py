@@ -13,7 +13,7 @@ from utils.utils import reset_random_seeds
 from utils.checkpoint_utils import ResumePhase, load_checkpoint, validate_resume_config
 from train.train_tree import run_tree
 from train.validate_tree import val_tree
-
+from models.CoMA import mesh_operations
 
 def run_experiment(configs):
 	"""
@@ -78,6 +78,31 @@ def run_experiment(configs):
 		wandb_kwargs["id"] = resume_checkpoint['wandb_run_id']
 		wandb_kwargs["resume"] = "allow"
 	wandb.init(**wandb_kwargs)
+	wandb.define_metric('wandb_epoch_step')
+	epoch_metric_names = (
+		'loss_value',
+		'rec_loss',
+		'kl_decisions',
+		'kl_root',
+		'kl_nodes',
+		'aug_decisions',
+		'perc_samples',
+		'nmi',
+		'accuracy',
+	)
+	for metric_name in epoch_metric_names:
+		wandb.define_metric(
+			f'train/{metric_name}',
+			step_metric='wandb_epoch_step',
+		)
+		wandb.define_metric(
+			f'validation/{metric_name}',
+			step_metric='wandb_epoch_step',
+		)
+	wandb.define_metric(
+		'train/alpha',
+		step_metric='wandb_epoch_step',
+	)
 	configs['globals']['wandb_run_id'] = wandb.run.id if wandb.run is not None else None
 
 	# Reproducibility
@@ -85,6 +110,32 @@ def run_experiment(configs):
 
 	# Generate a new dataset each run
 	trainset, trainset_eval, testset = get_data(configs)
+
+	# Here, Mesh
+	if configs['training']['modal'] == 'mesh':  # MANO for CoMA
+		default_mano_path = Path(
+			'/workspace/dwkwon/HOGraspNet/thirdparty/'
+			'mano_v1_2/models/MANO_RIGHT.pkl'
+		)
+		mano_model_path = configs['training'].get(
+			'mano_model_path',
+			default_mano_path,
+		)
+		template_mesh = mesh_operations.load_mano_template(mano_model_path)
+		M, A, D, U = mesh_operations.generate_transform_matrices(
+			template_mesh,
+			configs['training']['downsampling_factors'],
+		)
+
+		D_t = [mesh_operations.scipy_to_torch_sparse(d).to(device) for d in D]
+		U_t = [mesh_operations.scipy_to_torch_sparse(u).to(device) for u in U]
+		A_t = [mesh_operations.scipy_to_torch_sparse(a).to(device) for a in A]
+		num_nodes_mesh = [len(M[i].v) for i in range(len(M))]
+
+		configs['training']['encoder']['D_t'] = D_t
+		configs['training']['encoder']['U_t'] = U_t
+		configs['training']['encoder']['A_t'] = A_t
+		configs['training']['encoder']['num_nodes_mesh'] = num_nodes_mesh
 
 	# Run the full training of treeVAE model, including the growing of the tree
 	model = run_tree(

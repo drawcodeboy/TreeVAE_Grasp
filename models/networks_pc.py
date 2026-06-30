@@ -310,7 +310,7 @@ class FoldingNetEncoder(nn.Module):
         x = self.bn4(self.conv4(x)) # (B, encoded_size, 1)
         x = self.bn5(self.conv5(x)) # (B, encoded_size, 1)
         x = x.squeeze(-1) # (B, encoded_size)
-        return x, None, None # The reason why return the 'None' is PointNet implementation.
+        return x
     
 class FoldingLayer(nn.Module):
     """

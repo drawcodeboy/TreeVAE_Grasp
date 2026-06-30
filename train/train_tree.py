@@ -86,8 +86,20 @@ def run_tree(trainset, trainset_eval, testset, device, configs, resume_checkpoin
 
 	start_epoch = 0
 	global_step = 0
+	wandb_epoch_step = 0
 	resume_phase = resume_checkpoint['phase'] if resume_checkpoint is not None else None
 	if resume_checkpoint is not None:
+		wandb_epoch_step = int(
+			resume_checkpoint.get(
+				'wandb_epoch_step',
+				getattr(wandb.run, 'step', 0) or 0,
+			)
+		)
+		if 'wandb_epoch_step' not in resume_checkpoint:
+			print(
+				'Checkpoint predates wandb_epoch_step; '
+				f'resuming WandB logging from step {wandb_epoch_step}.'
+			)
 		if resume_phase not in {
 			ResumePhase.INITIAL_TRAINING,
 			ResumePhase.GROW_LOOP_BOUNDARY,
@@ -153,19 +165,29 @@ def run_tree(trainset, trainset_eval, testset, device, configs, resume_checkpoin
 	metrics_calc_val = Custom_Metrics(device).to(device)
 
 	################################# TRAINING TREEVAE with depth defined in config #################################
-	
+
 	# Training the initial tree
 	for epoch in range(start_epoch, configs['training']['num_epochs']):  # loop over the dataset multiple times
-		train_one_epoch(gen_train, model, optimizer, metrics_calc_train, epoch, device, configs=configs)
-		validate_one_epoch(gen_test, model, metrics_calc_val, epoch, device, configs=configs)
+		print("Training initial tree")
+		train_one_epoch(
+			gen_train, model, optimizer, metrics_calc_train, epoch, device,
+			configs=configs, wandb_step=wandb_epoch_step,
+		)
+		print("Validate initial tree")
+		validate_one_epoch(
+			gen_test, model, metrics_calc_val, epoch, device,
+			configs=configs, wandb_step=wandb_epoch_step,
+		)
 		lr_scheduler.step()
 		alpha_scheduler.on_epoch_end(epoch)
 		global_step += len(gen_train)
+		wandb_epoch_step += 1
 		if experiment_path is not None:
 			checkpoint = build_checkpoint(
 				phase=ResumePhase.INITIAL_TRAINING,
 				phase_epoch=epoch,
 				global_step=global_step,
+				wandb_epoch_step=wandb_epoch_step,
 				model=model,
 				optimizer=optimizer,
 				lr_scheduler=lr_scheduler,
@@ -236,16 +258,26 @@ def run_tree(trainset, trainset_eval, testset, device, configs, resume_checkpoin
 				# Training the initial split
 				print('\nTree intermediate finetuning\n')
 				for epoch in range(intermediate_start_epoch, configs['training']['num_epochs_intermediate_fulltrain']):
-					train_one_epoch(gen_train, model, optimizer, metrics_calc_train, epoch, device, configs=configs)
-					validate_one_epoch(gen_test, model, metrics_calc_val, epoch, device, configs=configs)
+					print("Train intermediate finetuning")
+					train_one_epoch(
+						gen_train, model, optimizer, metrics_calc_train, epoch, device,
+						configs=configs, wandb_step=wandb_epoch_step,
+					)
+					print("Validate intermediate finetuning")
+					validate_one_epoch(
+						gen_test, model, metrics_calc_val, epoch, device,
+						configs=configs, wandb_step=wandb_epoch_step,
+					)
 					lr_scheduler.step()
 					alpha_scheduler.on_epoch_end(epoch)
 					global_step += len(gen_train)
+					wandb_epoch_step += 1
 					if experiment_path is not None:
 						checkpoint = build_checkpoint(
 							phase=ResumePhase.INTERMEDIATE_FINETUNING,
 							phase_epoch=growing_iterations,
 							global_step=global_step,
+							wandb_epoch_step=wandb_epoch_step,
 							model=model,
 							optimizer=optimizer,
 							lr_scheduler=lr_scheduler,
@@ -336,18 +368,28 @@ def run_tree(trainset, trainset_eval, testset, device, configs, resume_checkpoin
 
 		# Training the smalltree subsplit
 		for epoch in range(smalltree_start_epoch, configs['training']['num_epochs_smalltree']):
-			train_one_epoch(gen_train_small, model, optimizer, metrics_calc_train, epoch, device, train_small_tree=True,
-							small_model=small_model, ind_leaf=ind_leaf, configs=configs)
-			validate_one_epoch(gen_test_small, model, metrics_calc_val, epoch, device, train_small_tree=True,
-							   small_model=small_model, ind_leaf=ind_leaf, configs=configs)
+			print("Train small tree")
+			train_one_epoch(
+				gen_train_small, model, optimizer, metrics_calc_train, epoch, device,
+				train_small_tree=True, small_model=small_model, ind_leaf=ind_leaf,
+				configs=configs, wandb_step=wandb_epoch_step,
+			)
+			print("Validate small tree")
+			validate_one_epoch(
+				gen_test_small, model, metrics_calc_val, epoch, device,
+				train_small_tree=True, small_model=small_model, ind_leaf=ind_leaf,
+				configs=configs, wandb_step=wandb_epoch_step,
+			)
 			lr_scheduler.step()
 			alpha_scheduler.on_epoch_end(epoch)
 			global_step += len(gen_train_small)
+			wandb_epoch_step += 1
 			if experiment_path is not None:
 				checkpoint = build_checkpoint(
 					phase=ResumePhase.SMALLTREE_TRAINING,
 					phase_epoch=growing_iterations,
 					global_step=global_step,
+					wandb_epoch_step=wandb_epoch_step,
 					model=model,
 					optimizer=optimizer,
 					lr_scheduler=lr_scheduler,
@@ -385,6 +427,7 @@ def run_tree(trainset, trainset_eval, testset, device, configs, resume_checkpoin
 				phase=ResumePhase.ATTACH_DONE,
 				phase_epoch=growing_iterations,
 				global_step=global_step,
+				wandb_epoch_step=wandb_epoch_step,
 				model=model,
 				optimizer=attach_optimizer,
 				lr_scheduler=attach_lr_scheduler,
@@ -425,6 +468,7 @@ def run_tree(trainset, trainset_eval, testset, device, configs, resume_checkpoin
 				phase=ResumePhase.GROW_LOOP_BOUNDARY,
 				phase_epoch=growing_iterations,
 				global_step=global_step,
+				wandb_epoch_step=wandb_epoch_step,
 				model=model,
 				optimizer=grow_optimizer,
 				lr_scheduler=grow_lr_scheduler,
@@ -482,6 +526,7 @@ def run_tree(trainset, trainset_eval, testset, device, configs, resume_checkpoin
 				phase=ResumePhase.PRUNE_PRECHECK_DONE,
 				phase_epoch=0,
 				global_step=global_step,
+				wandb_epoch_step=wandb_epoch_step,
 				model=model,
 				optimizer=prune_optimizer,
 				lr_scheduler=prune_lr_scheduler,
@@ -515,6 +560,7 @@ def run_tree(trainset, trainset_eval, testset, device, configs, resume_checkpoin
 					phase=ResumePhase.PRUNING,
 					phase_epoch=pruning_iterations,
 					global_step=global_step,
+					wandb_epoch_step=wandb_epoch_step,
 					model=model,
 					optimizer=prune_optimizer,
 					lr_scheduler=prune_lr_scheduler,
@@ -573,6 +619,7 @@ def run_tree(trainset, trainset_eval, testset, device, configs, resume_checkpoin
 					phase=ResumePhase.PRUNING,
 					phase_epoch=pruning_iterations,
 					global_step=global_step,
+					wandb_epoch_step=wandb_epoch_step,
 					model=model,
 					optimizer=prune_optimizer,
 					lr_scheduler=prune_lr_scheduler,
@@ -618,16 +665,24 @@ def run_tree(trainset, trainset_eval, testset, device, configs, resume_checkpoin
 	# finetune the full tree
 	print('\nTree final finetuning\n')
 	for epoch in range(final_start_epoch, configs['training']['num_epochs_finetuning']):  # loop over the dataset multiple times
-		train_one_epoch(gen_train, model, optimizer, metrics_calc_train, epoch, device, configs=configs)
-		validate_one_epoch(gen_test, model, metrics_calc_val, epoch, device, configs=configs)
+		train_one_epoch(
+			gen_train, model, optimizer, metrics_calc_train, epoch, device,
+			configs=configs, wandb_step=wandb_epoch_step,
+		)
+		validate_one_epoch(
+			gen_test, model, metrics_calc_val, epoch, device,
+			configs=configs, wandb_step=wandb_epoch_step,
+		)
 		lr_scheduler.step()
 		alpha_scheduler.on_epoch_end(epoch)
 		global_step += len(gen_train)
+		wandb_epoch_step += 1
 		if experiment_path is not None:
 			checkpoint = build_checkpoint(
 				phase=ResumePhase.FINAL_FINETUNING,
 				phase_epoch=epoch,
 				global_step=global_step,
+				wandb_epoch_step=wandb_epoch_step,
 				model=model,
 				optimizer=optimizer,
 				lr_scheduler=lr_scheduler,

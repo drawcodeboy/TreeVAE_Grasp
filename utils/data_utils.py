@@ -343,6 +343,7 @@ def get_data(configs):
 
 	elif data_name in ['hograspnet_contact']:
 		reset_random_seeds(configs['globals']['seed'])
+		mode = configs['data']['mode']
 
 		transform_eval = T.Compose([])
 
@@ -367,6 +368,11 @@ def get_data(configs):
 		testset = HOGraspNetMANOContactDataset(root=configs['data']['root'],
 									   		   split='test',
 									   		   transform=transform_eval)
+		
+		# debug_count = 500
+		# trainset = torch.utils.data.Subset(trainset, range(debug_count))
+		# trainset_eval = torch.utils.data.Subset(trainset_eval, range(debug_count))
+		# testset = torch.utils.data.Subset(testset, range(debug_count))
 
 	else:
 		raise NotImplementedError('This dataset is not supported!')
@@ -419,7 +425,7 @@ def get_gen(dataset, configs, validation=False, shuffle=True, smalltree=False, s
 		batch_size = batch_size // 2
 		collate_fn = (
 			contact_collate_fn
-			if configs['data']['data_name'] == 'hograspnet_contact'
+			if configs['data']['data_name'] == 'hograspnet_contact' and configs['data']['mode'] == 'prediction'
 			else custom_collate_fn
 		)
 		data_gen = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, pin_memory=True,
