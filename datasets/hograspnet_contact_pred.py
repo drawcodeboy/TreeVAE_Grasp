@@ -20,7 +20,7 @@ class HOGraspNetMANOContactDataset(Dataset):
         root="/workspace/dwkwon/HOGraspNet/processed_data/hand_pose_plus_mano_contact",
         split='train',
         transform=None,
-        mode='recon' # recon or prediction
+        mode='recon' # recon / prediction / skel_recon
     ):
         super().__init__()
         self.root = Path(root)
@@ -48,43 +48,72 @@ class HOGraspNetMANOContactDataset(Dataset):
     def __getitem__(self, idx):
         sample_path, taxo_label = self.data_li[idx]
         data_dict = np.load(sample_path)
-
-        mano_vertices = data_dict['mano_vertices']
-        contact_map = data_dict['contact_map']
         taxo_label = int(taxo_label)
 
-        # Normalization
-        # Location
-        root = data_dict['hand_pose'][0] # wrist joint
-        mano_vertices = mano_vertices - root[None, :]
-        # Scale
-        mano_vertices = mano_vertices / self.MANO_GLOBAL_SCALE
+        ### 1. 4D to 4D recon
+        if self.mode == 'recon':
+            mano_vertices = data_dict['mano_vertices']
+            contact_map = data_dict['contact_map']
 
-        # To Tensor
-        mano_vertices = torch.tensor(mano_vertices, dtype=torch.float32)
-        contact_map = torch.tensor(contact_map, dtype=torch.float32)
+            # Normalization
+            # Location
+            root = data_dict['hand_pose'][0] # wrist joint
+            mano_vertices = mano_vertices - root[None, :]
+            # Scale
+            mano_vertices = mano_vertices / self.MANO_GLOBAL_SCALE
 
-        if self.transform is not None:
-            mano_vertices = self.transform(mano_vertices)
+            # To Tensor
+            mano_vertices = torch.tensor(mano_vertices, dtype=torch.float32)
+            contact_map = torch.tensor(contact_map, dtype=torch.float32)
 
-        if mano_vertices.dim() == 2: # Default Augmentations (w/o ContrastiveTransformations)
-            mano_vertices = rearrange(mano_vertices, 'n c -> c n')
-            if self.mode == 'prediction':
-                pass # TODO: implementation here
-            elif self.mode == 'recon':
+            if self.transform is not None:
+                mano_vertices = self.transform(mano_vertices)
+
+            if mano_vertices.dim() == 2: # Default Augmentations (w/o ContrastiveTransformations)
+                mano_vertices = rearrange(mano_vertices, 'n c -> c n')
                 x = torch.cat([mano_vertices, contact_map.unsqueeze(0)], dim=0)
                 x = rearrange(x, 'c n -> n c')
                 return x, taxo_label
-        elif mano_vertices.dim() == 3: # ContrastiveTransformations
-            mano_vertices = rearrange(mano_vertices, 'b n c -> b c n')
-            if self.mode == 'prediction':
-                # TODO: implementation here
-                pass
-            elif self.mode == 'recon':
+            elif mano_vertices.dim() == 3: # ContrastiveTransformations
+                mano_vertices = rearrange(mano_vertices, 'b n c -> b c n')
                 contact_map = contact_map.unsqueeze(0).expand(mano_vertices.size(0), -1, -1)
                 x = torch.cat([mano_vertices, contact_map], dim=1) # (2, 4, 778)
                 x = rearrange(x, 'b c n -> b n c')
                 return x, taxo_label
+            
+        ### 2. 3D point cloud (hand + object) -> contact map prediction
+        elif self.mode == 'prediction':
+            mano_pointcloud = data_dict['mano_vertices']
+            object_pointcloud = data_dict['object_pointcloud']
+            contact_map = data_dict['contact_map']
+
+            # Normalization
+            root = data_dict['hand_pose'][0] # wrist joint
+            mano_pointcloud = mano_pointcloud - root[None, :]
+            object_pointcloud = object_pointcloud - root[None, :]
+            # Scale
+            mano_pointcloud = mano_pointcloud / self.MANO_GLOBAL_SCALE
+            object_pointcloud = object_pointcloud / self.MANO_GLOBAL_SCALE
+
+            # To Tensor
+            mano_pointcloud = torch.tensor(mano_pointcloud, dtype=torch.float32)
+            object_pointcloud = torch.tensor(object_pointcloud, dtype=torch.float32)
+            contact_map = torch.tensor(contact_map, dtype=torch.float32)
+
+            total_pointcloud = torch.cat([mano_pointcloud, object_pointcloud], dim=0)
+
+            if self.transform is not None:
+                total_pointcloud = self.transform(total_pointcloud)
+
+            # total_pointcloud: (3, N)
+            # contact_map: (778)
+
+            if total_pointcloud.dim() == 2:
+                total_pointcloud = rearrange(total_pointcloud, 'n c -> c n')
+                return (total_pointcloud, contact_map), taxo_label
+            elif total_pointcloud.dim() == 3:
+                total_pointcloud = rearrange(total_pointcloud, 'b n c -> b c n')
+                return (total_pointcloud, contact_map), taxo_label
 
     def _parse_index_metadata(self):
         """Return index-to-subject/taxonomy metadata parsed from filenames."""
@@ -309,14 +338,11 @@ class HOGraspNetMANOContactDataset(Dataset):
 
 if __name__ == '__main__':
     train_ds = HOGraspNetMANOContactDataset(split='train', 
-                                            mode='recon')
-    # (vertices, contact_map), label = train_ds[0]
-    # print(vertices.shape)
-    # print(contact_map.shape)
-    x, label = train_ds[0]
-    print(x.shape)
-    # print(np.max(vertices), np.min(vertices))
-    # print(np.max(contact_map), np.min(contact_map))
+                                            mode='prediction')
+
+    (total_pc, contact_map), taxo_label = train_ds[0]
+    print(total_pc.shape, contact_map.shape)
+
 
     '''
     train_ds = HOGraspNetMANOContactDataset(split='train')

@@ -15,12 +15,14 @@ from sklearn.metrics.cluster import adjusted_rand_score, normalized_mutual_info_
 
 from models.model import TreeVAE
 from train.validate_tree import compute_likelihood
+from utils.checkpoint_utils import ResumePhase, load_checkpoint
 from utils.data_utils import get_data, get_gen
-from utils.model_utils import construct_data_tree, construct_tree_fromnpy
-from utils.taxonomy_class_utils import taxoclass
+from utils.model_utils import construct_data_tree, construct_tree_fromnpy, restore_tree_from_topology
+from utils.taxonomy_class_utils import TaxonomyClass
 from utils.training_utils import Custom_Metrics, compute_leaves, get_dataset_labels, predict, validate_one_epoch
 from utils.utils import cluster_acc, dendrogram_purity, leaf_purity, reset_random_seeds
 
+taxoclass = TaxonomyClass()
 
 def compute_tree_layout(data_tree):
     children_by_parent = {}
@@ -138,8 +140,14 @@ def save_tree_visualization(data_tree, y_test, y_test_pred, data_name):
         counts = np.array([np.sum(y_test[indices] == label) for label in class_labels])
         leaf_label_counts.append(counts)
 
-    save_path = Path("assets") / "test_tree_leaf_label_histograms.png"
-    use_taxonomy_colors = data_name in {"hograspnet_full_toy", "hograspnet_uniform_toy"}
+    vis_count = 1
+    assets_vis = os.listdir("assets")
+    for fname in assets_vis:
+        if fname.startswith("test_tree_leaf_label_histograms"):
+            vis_count += 1
+
+    save_path = Path("assets") / f"test_tree_leaf_label_histograms_{vis_count:03d}.png"
+    use_taxonomy_colors = data_name in {"hograspnet_full_toy", "hograspnet_uniform_toy", "hograspnet_contact"}
     plot_tree_with_leaf_label_histograms(
         data_tree,
         leaf_label_counts,
@@ -162,6 +170,41 @@ def load_config(checkpoint_path):
     configs["globals"]["save_model"] = False
     configs["globals"]["wandb_logging"] = "disabled"
     return configs
+
+
+def load_treevae_training_checkpoint(checkpoint_file, device):
+    checkpoint = load_checkpoint(checkpoint_file, device)
+    if "tree_topology" not in checkpoint:
+        raise ValueError(
+            f"Checkpoint does not contain tree_topology: {checkpoint_file}. "
+            "Use a checkpoint_last.pt created by the current checkpoint format."
+        )
+    configs = checkpoint["configs"]
+    configs.setdefault("parser", {})
+    configs["globals"]["save_model"] = False
+    configs["globals"]["wandb_logging"] = "disabled"
+
+    model = TreeVAE(**configs["training"])
+    model = restore_tree_from_topology(model, checkpoint["tree_topology"], configs)
+    state_dict = normalize_state_dict_keys(checkpoint["model_state_dict"])
+    try:
+        model.load_state_dict(state_dict, strict=True)
+    except RuntimeError as error:
+        print_load_diagnostics(model, state_dict)
+        raise error
+
+    model.to(device)
+    model.eval()
+
+    phase = checkpoint["phase"]
+    print("Checkpoint phase:", phase)
+    if phase == ResumePhase.SMALLTREE_TRAINING:
+        print(
+            "Evaluating the currently attached full tree only; "
+            "the in-progress SmallTree is not included."
+        )
+
+    return configs, model
 
 
 def load_treevae_checkpoint(checkpoint_path, configs, device):
@@ -273,6 +316,59 @@ def evaluate_test_only(testset, model, device, configs):
     dp = dendrogram_purity(model.tree, y_test, ind_samples_of_leaves, configs["training"]["n_ary"])
     lp = leaf_purity(model.tree, y_test, ind_samples_of_leaves, configs["training"]["n_ary"])
 
+    # 1-level clustering metric
+
+    # from true taxo label to PIP label
+    y_true_lev_1 = np.array(
+        [
+            taxoclass.label_to_category_integer[int(label)]
+            for label in y_test
+        ]
+    )
+
+    # from pred taxo label to PIP label
+    root_children = model.tree.active_children()
+    if not root_children:
+        raise ValueError("Cannot compute a 1-level clustering metric for a tree without root children.")
+
+    # Reproduce the breadth-first leaf order used to construct p_c_z in
+    # TreeVAE.forward(), while carrying each leaf's root-child cluster ID.
+    nodes_to_visit = [
+        (child, root_child_idx)
+        for root_child_idx, child in enumerate(root_children)
+    ]
+    leaf_to_level_1 = []
+    while nodes_to_visit:
+        node, root_child_idx = nodes_to_visit.pop(0)
+        if node.router is not None:
+            nodes_to_visit.extend(
+                (child, root_child_idx)
+                for child in node.active_children()
+            )
+        elif node.decoder is not None:
+            leaf_to_level_1.append(root_child_idx)
+        else:
+            nodes_to_visit.append((node.single_child(), root_child_idx))
+
+    if len(leaf_to_level_1) != prob_leaves_test.shape[1]:
+        raise ValueError(
+            "Tree traversal and p_c_z disagree on the number of leaves: "
+            f"tree={len(leaf_to_level_1)}, p_c_z={prob_leaves_test.shape[1]}."
+        )
+
+    prob_level_1 = torch.zeros(
+        (prob_leaves_test.shape[0], len(root_children)),
+        dtype=prob_leaves_test.dtype,
+        device=prob_leaves_test.device,
+    )
+    for leaf_idx, root_child_idx in enumerate(leaf_to_level_1):
+        prob_level_1[:, root_child_idx] += prob_leaves_test[:, leaf_idx]
+
+    y_pred_lev_1 = prob_level_1.argmax(dim=1).cpu().numpy()
+    acc_lev_1 = cluster_acc(y_true_lev_1, y_pred_lev_1)
+    nmi_lev_1 = normalized_mutual_info_score(y_true_lev_1, y_pred_lev_1)
+    ari_lev_1 = adjusted_rand_score(y_true_lev_1, y_pred_lev_1)
+
     data_tree = construct_data_tree(
         model,
         y_predicted=y_test_pred,
@@ -287,6 +383,9 @@ def evaluate_test_only(testset, model, device, configs):
     print("Accuracy:", acc)
     print("Normalized Mutual Information:", nmi)
     print("Adjusted Rand Index:", ari)
+    print("1-level Accuracy:", acc_lev_1)
+    print("1-level Normalized Mutual Information:", nmi_lev_1)
+    print("1-level Adjusted Rand Index:", ari_lev_1)
     print("Dendrogram Purity:", dp)
     print("Leaf Purity:", lp)
     print("Digits", np.unique(y_test))
@@ -309,7 +408,10 @@ def main():
         "--checkpoint_path",
         type=Path,
         required=True,
-        help="Path to an experiment directory containing config.yaml, data_tree.npy, and model_weights.pt.",
+        help=(
+            "Path to checkpoint_last.pt, or to a legacy experiment directory "
+            "containing config.yaml, data_tree.npy, and model_weights.pt."
+        ),
     )
     parser.add_argument("--num_workers", type=int, default=None, help="Override DataLoader num_workers.")
     parser.add_argument(
@@ -320,11 +422,19 @@ def main():
     args = parser.parse_args()
 
     checkpoint_path = args.checkpoint_path.expanduser().resolve()
-    configs = load_config(checkpoint_path)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    if checkpoint_path.is_file():
+        configs, model = load_treevae_training_checkpoint(checkpoint_path, device)
+    elif checkpoint_path.is_dir():
+        configs = load_config(checkpoint_path)
+        model = load_treevae_checkpoint(checkpoint_path, configs, device)
+    else:
+        raise FileNotFoundError(f"Checkpoint path does not exist: {checkpoint_path}")
+
     if args.num_workers is not None:
         configs["parser"]["num_workers"] = args.num_workers
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Checkpoint path:", checkpoint_path)
     print("Device:", device)
 
@@ -332,7 +442,6 @@ def main():
     reset_random_seeds(configs["globals"]["seed"])
 
     _, _, testset = get_data(configs)
-    model = load_treevae_checkpoint(checkpoint_path, configs, device)
     evaluate_test_only(testset, model, device, configs)
 
     if args.compute_ll:

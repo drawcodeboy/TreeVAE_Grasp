@@ -367,7 +367,38 @@ class Router(nn.Module):
             return d, x
         else:
             return d
-        
+
+class MLPDecoder(nn.Module):
+    def __init__(self, input_shape, output_shape, activation):
+        super().__init__()
+        self.activation = activation
+        self.dense1 = nn.Linear(in_features=input_shape, out_features=128, bias=False)
+        self.bn1 = nn.BatchNorm1d(128)
+        self.dense2 = nn.Linear(in_features=128, out_features=256, bias=False)
+        self.bn2 = nn.BatchNorm1d(256)
+        self.dense3 = nn.Linear(in_features=256, out_features=512, bias=False)
+        self.bn3 = nn.BatchNorm1d(512)
+        self.dense4 = nn.Linear(in_features=512, out_features=512, bias=False)
+        self.bn4 = nn.BatchNorm1d(512)
+        self.dense5 = nn.Linear(in_features=512, out_features=output_shape, bias=True)
+
+    def forward(self, inputs):
+        x = self.dense1(inputs)
+        x = self.bn1(x)
+        x = actvn(x)
+        x = self.dense2(x)
+        x = self.bn2(x)
+        x = actvn(x)
+        x = self.dense3(x)
+        x = self.bn3(x)
+        x = actvn(x)
+        x = self.dense4(x)
+        x = self.bn4(x)
+        x = actvn(x)
+        x = self.dense5(x)
+        if self.activation == "sigmoid":
+            x = torch.sigmoid(x)
+        return x
 
 def get_encoder(architecture, encoded_size, x_shape, size=None):
     if architecture == 'mlp':
@@ -395,4 +426,9 @@ def get_decoder(architecture, input_shape, output_shape, activation):
         decoder = DecoderOmniglot(input_shape, activation) 
     else:
         raise ValueError('The decoder architecture is mispecified.')
+    return decoder
+
+def get_decoder_contactmap_mlp(architecture, input_shape, output_shape, activation):
+    if architecture == 'mlp':
+        decoder = MLPDecoder(input_shape, output_shape, activation)
     return decoder

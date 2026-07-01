@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torch.distributions as td
 from utils.model_utils import construct_tree, compute_posterior
-from models.networks import get_encoder, get_decoder, MLP, Router, Dense
+from models.networks import get_encoder, get_decoder, MLP, Router, Dense, get_decoder_contactmap_mlp
 from models.networks_pc import get_encoder_pc, get_decoder_pc
 from models.CoMA.model import get_encoder_coma, get_decoder_coma
 from models.CoMA import mesh_operations
@@ -152,8 +152,8 @@ class TreeVAE(nn.Module):
         encoder = None
         if self.modal == 'pointcloud':
             encoder = get_encoder_pc(architecture=self.kwargs['encoder']['architecture'],
-                                    encoded_size=self.hidden_layers[0],
-                                    num_points=self.kwargs['encoder']['num_points'])
+                                     encoded_size=self.hidden_layers[0],
+                                     num_points=self.kwargs['encoder']['num_points'])
         elif self.modal == 'mesh':
             # 여기 arguments 할당
             encoder = get_encoder_coma(architecture=self.kwargs['encoder']['architecture'],
@@ -165,6 +165,10 @@ class TreeVAE(nn.Module):
                                        adjacency_matrices=self.kwargs['encoder']['A_t'],
                                        num_nodes=self.kwargs['encoder']['num_nodes_mesh']
                                        )
+        elif self.modal == 'pointcloud_contactmap_prediction':
+            encoder = get_encoder_pc(architecture=self.kwargs['encoder']['architecture'],
+                                     encoded_size=self.hidden_layers[0],
+                                     num_points=self.kwargs['encoder']['num_points'])
 
         self.bottom_up = nn.ModuleList([encoder])
         for i in range(1, len(self.hidden_layers)):
@@ -275,6 +279,14 @@ class TreeVAE(nn.Module):
                         num_nodes=self.kwargs['encoder']['num_nodes_mesh'],
                     )
                 )
+        elif self.modal == 'pointcloud_contactmap_prediction':
+            for _ in range(self.n_ary ** (self.depth)):
+                self.decoders.append(
+                    get_decoder_contactmap_mlp(architecture=self.kwargs['decoder']['architecture'],
+                                               input_shape=self.kwargs['decoder']['input_shape'],
+                                               output_shape=self.kwargs['decoder']['output_shape'],
+                                               activation=self.kwargs['decoder']['activation'])
+                )
 
         # construct the tree
         self.tree = construct_tree(transformations=self.transformations, routers=self.decisions,
@@ -305,7 +317,11 @@ class TreeVAE(nn.Module):
         """
         # Small constant to prevent numerical instability
         epsilon = 1e-7  
-        device = x.device
+        if self.modal == 'pointcloud_contactmap_prediction':
+            x, to_pred = x
+            device = x.device
+        else:
+            device = x.device
         
         # compute deterministic bottom up
         d = x
@@ -313,10 +329,7 @@ class TreeVAE(nn.Module):
         emb_contr = []
 
         for i in range(0, len(self.hidden_layers)):
-            if i == 0:
-                d = self.bottom_up[i](d)
-            else:
-                d, _, _ = self.bottom_up[i](d)
+            d, _, _ = self.bottom_up[i](d)
             # store bottom-up embeddings for top-down
             encoders.append(d)
 
@@ -476,7 +489,12 @@ class TreeVAE(nn.Module):
         # p_c_z is the probability of reaching a leaf and is of shape [batch_size, num_clusters]
         p_c_z = torch.cat([prob.unsqueeze(-1) for prob in leaves_prob], dim=-1)
         
-        rec_losses = self.loss(x, reconstructions, leaves_prob)
+        rec_losses = None
+        if self.modal == 'pointcloud_contactmap_prediction':
+            rec_losses = self.loss(to_pred, reconstructions, leaves_prob)
+        else:
+            rec_losses = self.loss(x, reconstructions, leaves_prob)
+
         rec_loss = torch.mean(rec_losses, dim=0)
 
         return_dict = {
@@ -496,7 +514,7 @@ class TreeVAE(nn.Module):
             return_dict['bottom_up'] = encoders
 
         if self.return_x:
-            return_dict['input'] = x
+            return_dict['input'] = (x, to_pred)
 
         return return_dict
 

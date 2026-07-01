@@ -361,13 +361,16 @@ def get_data(configs):
 
 		trainset = HOGraspNetMANOContactDataset(root=configs['data']['root'],
 										  		split='train',
-												transform=transform)
+												transform=transform,
+												mode=configs['data']['mode'])
 		trainset_eval = HOGraspNetMANOContactDataset(root=configs['data']['root'],
 											 		 split='train',
-											 		 transform=transform_eval)
+											 		 transform=transform_eval,
+													 mode=configs['data']['mode'])
 		testset = HOGraspNetMANOContactDataset(root=configs['data']['root'],
 									   		   split='test',
-									   		   transform=transform_eval)
+									   		   transform=transform_eval,
+											   mode=configs['data']['mode'])
 		
 		# debug_count = 500
 		# trainset = torch.utils.data.Subset(trainset, range(debug_count))
@@ -459,21 +462,19 @@ def custom_collate_fn(batch):
 
 def contact_collate_fn(batch):
 	"""Flatten contrastive views and duplicate their contact maps and labels."""
-	(inputs, labels) = torch.utils.data.default_collate(batch)
-	mano_vertices, contact_map = inputs
+	((total_pointcloud, contact_map), labels) = torch.utils.data.default_collate(batch)
 
 	# (B, V, 3, N) -> (V * B, 3, N), keeping the existing view-major order.
-	num_views = mano_vertices.shape[1]
-	mano_vertices = mano_vertices.transpose(1, 0).reshape(
-		-1, *mano_vertices.shape[2:]
+	num_views = total_pointcloud.shape[1]
+	total_pointcloud = total_pointcloud.transpose(1, 0).reshape(
+		-1, *total_pointcloud.shape[2:]
 	)
 	contact_map = contact_map.repeat(
 		(num_views,) + (1,) * (contact_map.dim() - 1)
 	)
 	labels = labels.repeat(num_views)
 
-	return (mano_vertices, contact_map), labels
-
+	return (total_pointcloud, contact_map), labels
 
 class ContrastiveTransformations(object):
 

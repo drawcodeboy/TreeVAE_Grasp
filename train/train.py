@@ -56,7 +56,7 @@ def run_experiment(configs):
 		timestr = time.strftime("%Y%m%d-%H%M%S")
 		ex_name = "{}_{}".format(str(timestr), uuid.uuid4().hex[:5])
 		# yml 파일에 result_dir이라는 attribute는 없긴 한데, 이거는 prepare_config()함수에서 정리됨.
-		experiment_path = configs['globals']['results_dir'] / configs['data']['data_name'] / ex_name
+		experiment_path = configs['globals']['results_dir'] / configs['run_name'] / ex_name
 		experiment_path.mkdir(parents=True)
 	os.makedirs(os.path.join(project_dir, '../models/logs', ex_name), exist_ok=True)
 	print("Experiment path: ", experiment_path)

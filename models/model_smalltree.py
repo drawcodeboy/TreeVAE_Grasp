@@ -4,7 +4,7 @@ SmallTreeVAE model (used for the growing procedure of TreeVAE).
 import torch
 import torch.nn as nn
 import torch.distributions as td
-from models.networks import get_decoder, MLP, Router, Dense
+from models.networks import get_decoder, MLP, Router, Dense, get_decoder_contactmap_mlp
 from models.networks_pc import get_decoder_pc
 from models.CoMA.model import get_decoder_coma
 from utils.model_utils import compute_posterior
@@ -125,6 +125,15 @@ class SmallTreeVAE(nn.Module):
                 )
                 for _ in range(self.n_ary)
             ])
+        elif self.modal == 'pointcloud_contactmap_prediction':
+            self.decoders = nn.ModuleList([
+                    get_decoder_contactmap_mlp(architecture=self.kwargs['decoder']['architecture'],
+                                               input_shape=self.kwargs['decoder']['input_shape'],
+                                               output_shape=self.kwargs['decoder']['output_shape'],
+                                               activation=self.kwargs['decoder']['activation']
+                )
+                for _ in range(self.n_ary)
+            ])
         else:
             raise ValueError(f"Unsupported modal for SmallTreeVAE: {self.modal!r}")
     def forward(self, x, z_parent, p, bottom_up):
@@ -155,7 +164,11 @@ class SmallTreeVAE(nn.Module):
             }
         """
         epsilon = 1e-7  # Small constant to prevent numerical instability
-        device = x.device
+        if self.modal == 'pointcloud_contactmap_prediction':
+            x, to_pred = x
+            device = x.device
+        else:
+            device = x.device
         
         # Extract relevant bottom-up
         d_q = bottom_up[-self.depth]
@@ -221,7 +234,11 @@ class SmallTreeVAE(nn.Module):
         # Probability of falling in each leaf
         p_c_z = torch.cat([prob.unsqueeze(-1) for prob in leaves_prob], dim=-1)
 
-        rec_losses = self.loss(x, reconstructions, leaves_prob)
+        rec_losses = None
+        if self.modal == 'pointcloud_contactmap_prediction':
+            rec_losses = self.loss(to_pred, reconstructions, leaves_prob)
+        else:
+            rec_losses = self.loss(x, reconstructions, leaves_prob)
         rec_loss = torch.mean(rec_losses, dim=0)    
 
         return {

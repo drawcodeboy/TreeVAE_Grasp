@@ -12,7 +12,7 @@ from torchmetrics import Metric
 from sklearn.metrics.cluster import normalized_mutual_info_score
 from utils.utils import cluster_acc
 from torch.utils.data import TensorDataset
-
+from utils.taxonomy_class_utils import TaxonomyClass
 
 def unpack_contact_batch(batch, device):
     """Move a nested HOGraspNet contact batch to the target device."""
@@ -21,7 +21,7 @@ def unpack_contact_batch(batch, device):
     return inputs, taxonomy_labels.to(device)
 
 
-def _is_hograspnet_contact(configs):
+def _is_hograspnet_prediction(configs):
     return (
         configs is not None
         and configs.get('data', {}).get('data_name') == 'hograspnet_contact'
@@ -70,7 +70,7 @@ def train_one_epoch(train_loader, model, optimizer, metrics_calc, epoch_idx, dev
     metrics_calc.reset()
 
     for batch_idx, batch in enumerate(tqdm(train_loader)):
-        if _is_hograspnet_contact(configs):
+        if _is_hograspnet_prediction(configs):
             inputs, labels = unpack_contact_batch(batch, device)
         else:
             inputs, labels = batch
@@ -103,11 +103,9 @@ def train_one_epoch(train_loader, model, optimizer, metrics_calc, epoch_idx, dev
         # Note that y_pred is used for computing nmi.
         # During subtree training, the nmi is calculated relative to only the subtree.
         y_pred = outputs['p_c_z'].argmax(dim=-1)
-        metrics_calc.update(loss_value, outputs['rec_loss'], outputs['kl_decisions'], outputs['kl_nodes'],
-                            outputs['kl_root'], outputs['aug_decisions'],
-                            (1 - torch.mean(y_pred.float()) if outputs['p_c_z'].shape[1] <= 2 else torch.tensor(0.,
-                                                                                                                device=device)),
-                            labels, y_pred)
+        metrics_calc.update(loss_value, outputs['rec_loss'], outputs['kl_decisions'], outputs['kl_nodes'], outputs['kl_root'], outputs['aug_decisions'],
+        (1 - torch.mean(y_pred.float()) if outputs['p_c_z'].shape[1] <= 2 else torch.tensor(0., device=device)),
+        labels, y_pred)
 
     if train_small_tree:
         model.return_bottomup[0] = False
@@ -149,7 +147,7 @@ def validate_one_epoch(test_loader, model, metrics_calc, epoch_idx, device, test
 
     with torch.no_grad():
         for batch_idx, batch in enumerate(tqdm(test_loader)):
-            if _is_hograspnet_contact(configs):
+            if _is_hograspnet_prediction(configs):
                 inputs, labels = unpack_contact_batch(batch, device)
             else:
                 inputs, labels = batch
@@ -235,7 +233,7 @@ def predict(loader, model, device, *return_flags, configs=None):
 
     with torch.no_grad():
         for batch_idx, batch in enumerate(tqdm(loader)):
-            if _is_hograspnet_contact(configs):
+            if _is_hograspnet_prediction(configs):
                 inputs, labels = unpack_contact_batch(batch, device)
             else:
                 inputs, labels = batch
@@ -638,6 +636,7 @@ class Custom_Metrics(Metric):
         self.add_state("y_true", default=[])
         self.add_state("y_pred", default=[])
         self.add_state("n_samples", default=torch.tensor(0, dtype=torch.int, device=device))
+        self.taxo_class = TaxonomyClass()
 
     def update(self, loss_value: torch.Tensor, rec_loss: torch.Tensor, kl_decisions: torch.Tensor,
                kl_nodes: torch.Tensor, kl_root: torch.Tensor, aug_decisions: torch.Tensor, perc_samples: torch.Tensor,

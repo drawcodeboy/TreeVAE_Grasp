@@ -12,10 +12,29 @@ class TaxonomyClass:
             'precision': '#1b9e77',
             'unknown': '#8c8c8c',
         }
+        '''
+        self.label_to_category = {
+            1: 'power',
+            2: 'power',
+            ...
+            27: 'precision',
+            ...
+        '''
         self.label_to_category = {
             int(label): category
             for category, labels in self.map.items()
             for label in labels
+        }
+
+        self.category_to_integer = {
+            'power': 0,
+            'intermediate': 1,
+            'precision': 2,
+        }
+
+        self.label_to_category_integer = {
+            label: self.category_to_integer[category]
+            for label, category in self.label_to_category.items()
         }
 
     def category_for_label(self, label):
@@ -26,6 +45,3 @@ class TaxonomyClass:
 
     def colors_for_labels(self, labels):
         return [self.color_for_label(label) for label in labels]
-
-
-taxoclass = TaxonomyClass()

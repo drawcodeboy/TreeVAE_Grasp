@@ -104,7 +104,7 @@ class ComaEncoder(torch.nn.Module):
             x = self.pool(x, self.downsample_matrices[i])
 
         x = x.reshape(x.shape[0], self.enc_lin.in_features)
-        return F.relu(self.enc_lin(x))
+        return F.relu(self.enc_lin(x)), None, None
 
     def reset_parameters(self):
         torch.nn.init.normal_(self.enc_lin.weight, 0, 0.1)
