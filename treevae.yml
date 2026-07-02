@@ -13,7 +13,10 @@ dependencies:
   - asttokens=2.0.5
   - attrs=23.1.0
   - backcall=0.2.0
+  - backports=1.0
+  - backports.functools_lru_cache=2.0.0
   - bleach=4.1.0
+  - brotli-python=1.1.0
   - brotlipy=0.7.0
   - bzip2=1.0.8
   - ca-certificates=2023.08.22
@@ -21,6 +24,7 @@ dependencies:
   - cffi=1.15.1
   - charset-normalizer=2.0.4
   - click=8.1.7
+  - colorama=0.4.6
   - comm=0.1.2
   - cryptography=41.0.3
   - cuda-version=11.8
@@ -31,8 +35,10 @@ dependencies:
   - defusedxml=0.7.1
   - docker-pycreds=0.4.0
   - entrypoints=0.4
+  - exceptiongroup=1.3.1
   - executing=0.8.3
   - filelock=3.12.4
+  - flit-core=3.12.0
   - freetype=2.12.1
   - gitdb=4.0.10
   - gitpython=3.1.37
@@ -40,6 +46,9 @@ dependencies:
   - gmpy2=2.1.2
   - icu=73.2
   - idna=3.4
+  - importlib-metadata=9.0.0
+  - importlib_metadata=9.0.0
+  - importlib_resources=7.1.0
   - ipykernel=6.25.0
   - ipython=8.15.0
   - ipython_genutils=0.2.0
@@ -98,7 +107,7 @@ dependencies:
   - nbconvert-pandoc=7.17.0
   - nbformat=5.9.2
   - nccl=2.19.3.1
-  - ncurses=6.4
+  - ncurses=6.4.20240210
   - nest-asyncio=1.5.6
   - networkx=3.1
   - notebook=6.5.4
@@ -114,13 +123,15 @@ dependencies:
   - pexpect=4.8.0
   - pickleshare=0.7.5
   - pillow=10.1.0
-  - pip=23.3
+  - pip=23.3.2
+  - pkgutil-resolve-name=1.3.10
   - platformdirs=3.10.0
   - prometheus_client=0.14.1
   - prompt-toolkit=3.0.36
   - prompt_toolkit=3.0.36
   - protobuf=4.24.3
   - psutil=5.9.5
+  - pthread-stubs=0.4
   - ptyprocess=0.7.0
   - pure_eval=0.2.2
   - pycparser=2.21
@@ -152,7 +163,7 @@ dependencies:
   - sniffio=1.2.0
   - soupsieve=2.5
   - stack_data=0.2.0
-  - sympy=1.12
+  - sympy=1.12.1
   - tbb=2021.10.0
   - terminado=0.17.1
   - testpath=0.6.0
@@ -173,23 +184,37 @@ dependencies:
   - websocket-client=0.58.0
   - wheel=0.41.2
   - widgetsnbextension=4.0.5
+  - xorg-libxau=1.0.11
+  - xorg-libxdmcp=1.1.3
   - xz=5.2.6
   - yaml=0.2.5
   - zeromq=4.3.4
+  - zipp=4.1.0
   - zlib=1.2.13
   - zstd=1.5.5
   - pip:
+      - aiohappyeyeballs==2.6.2
+      - aiohttp==3.14.1
+      - aiosignal==1.4.0
       - beautifulsoup4==4.12.2
       - contourpy==1.3.3
       - cycler==0.12.1
       - einops==0.8.2
       - fonttools==4.63.0
+      - frozenlist==1.8.0
+      - fsspec==2026.6.0
       - jupyterlab-pygments==0.2.2
       - kiwisolver==1.5.0
       - matplotlib==3.11.0
       - mistune==3.0.2
+      - multidict==6.7.1
       - nbclient==0.8.0
       - nbconvert==7.9.2
+      - propcache==0.5.2
       - pyparsing==3.3.2
       - tinycss2==1.2.1
-prefix: /workspace/lab_intern/miniconda3/envs/treevae
+      - torch-geometric==2.8.0
+      - torch-scatter==2.1.2
+      - xxhash==3.8.0
+      - yarl==1.24.2
+prefix: /workspace/dwkwon/miniconda3/envs/treevae
