@@ -7,6 +7,7 @@ import torch.distributions as td
 from utils.model_utils import construct_tree, compute_posterior
 from models.networks import get_encoder, get_decoder, MLP, Router, Dense, get_decoder_contactmap_mlp
 from models.networks_pc import get_encoder_pc, get_decoder_pc
+from models.networks_skeleton import get_encoder_skeleton, get_decoder_skeleton
 from models.CoMA.model import get_encoder_coma, get_decoder_coma
 from models.CoMA import mesh_operations
 from models.losses import loss_reconstruction_binary, loss_reconstruction_mse, loss_reconstruction_mae, loss_reconstruction_chamfer
@@ -169,6 +170,9 @@ class TreeVAE(nn.Module):
             encoder = get_encoder_pc(architecture=self.kwargs['encoder']['architecture'],
                                      encoded_size=self.hidden_layers[0],
                                      num_points=self.kwargs['encoder']['num_points'])
+        elif self.modal == 'handjoint':
+            encoder = get_encoder_skeleton(architecture=self.kwargs['encoder']['architecture'],
+                                           encoded_size=self.hidden_layers[0])
 
         self.bottom_up = nn.ModuleList([encoder])
         for i in range(1, len(self.hidden_layers)):
@@ -286,6 +290,14 @@ class TreeVAE(nn.Module):
                                                input_shape=self.kwargs['decoder']['input_shape'],
                                                output_shape=self.kwargs['decoder']['output_shape'],
                                                activation=self.kwargs['decoder']['activation'])
+                )
+        elif self.modal == 'handjoint':
+            for _ in range(self.n_ary ** (self.depth)):
+                self.decoders.append(
+                    get_decoder_skeleton(
+                        architecture=self.kwargs['decoder']['architecture'],
+                        input_shape=encoded_size_gen[-1]
+                    )
                 )
 
         # construct the tree
@@ -514,7 +526,10 @@ class TreeVAE(nn.Module):
             return_dict['bottom_up'] = encoders
 
         if self.return_x:
-            return_dict['input'] = (x, to_pred)
+            if self.modal == 'pointcloud_contactmap_prediction':
+                return_dict['input'] = (x, to_pred)
+            else:
+                return_dict['input'] = x
 
         return return_dict
 

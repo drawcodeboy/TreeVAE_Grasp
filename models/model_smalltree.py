@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.distributions as td
 from models.networks import get_decoder, MLP, Router, Dense, get_decoder_contactmap_mlp
 from models.networks_pc import get_decoder_pc
+from models.networks_skeleton import get_decoder_skeleton
 from models.CoMA.model import get_decoder_coma
 from utils.model_utils import compute_posterior
 from models.losses import loss_reconstruction_binary, loss_reconstruction_mse, loss_reconstruction_mae, loss_reconstruction_chamfer
@@ -127,10 +128,17 @@ class SmallTreeVAE(nn.Module):
             ])
         elif self.modal == 'pointcloud_contactmap_prediction':
             self.decoders = nn.ModuleList([
-                    get_decoder_contactmap_mlp(architecture=self.kwargs['decoder']['architecture'],
-                                               input_shape=self.kwargs['decoder']['input_shape'],
-                                               output_shape=self.kwargs['decoder']['output_shape'],
-                                               activation=self.kwargs['decoder']['activation']
+                get_decoder_contactmap_mlp(architecture=self.kwargs['decoder']['architecture'],
+                                            input_shape=self.kwargs['decoder']['input_shape'],
+                                            output_shape=self.kwargs['decoder']['output_shape'],
+                                            activation=self.kwargs['decoder']['activation']
+                )
+                for _ in range(self.n_ary)
+            ])
+        elif self.modal == 'handjoint':
+            self.decoders = nn.ModuleList([
+                get_decoder_skeleton(architecture=self.kwargs['decoder']['architecture'],
+                            input_shape=encoded_size_gen[-1],
                 )
                 for _ in range(self.n_ary)
             ])

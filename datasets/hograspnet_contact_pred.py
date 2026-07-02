@@ -105,15 +105,35 @@ class HOGraspNetMANOContactDataset(Dataset):
             if self.transform is not None:
                 total_pointcloud = self.transform(total_pointcloud)
 
-            # total_pointcloud: (3, N)
-            # contact_map: (778)
-
             if total_pointcloud.dim() == 2:
                 total_pointcloud = rearrange(total_pointcloud, 'n c -> c n')
                 return (total_pointcloud, contact_map), taxo_label
             elif total_pointcloud.dim() == 3:
                 total_pointcloud = rearrange(total_pointcloud, 'b n c -> b c n')
                 return (total_pointcloud, contact_map), taxo_label
+            
+        elif self.mode == 'handjoint':
+            hand_pose = data_dict['hand_pose']
+
+            # Normalization
+            hand_pose = hand_pose - hand_pose[0]
+            # Scale
+            hand_pose = hand_pose / self.MANO_GLOBAL_SCALE
+
+            # To Tensor
+            hand_pose = torch.tensor(hand_pose, dtype=torch.float32)
+
+            if self.transform is not None:
+                hand_pose = self.transform(hand_pose)
+
+            if hand_pose.dim() == 2:
+                hand_pose = rearrange(hand_pose, 'n c -> c n')
+                return hand_pose, taxo_label
+            elif hand_pose.dim() == 3:
+                hand_pose = rearrange(hand_pose, 'b n c -> b c n')
+                return hand_pose, taxo_label
+
+            return hand_pose, taxo_label
 
     def _parse_index_metadata(self):
         """Return index-to-subject/taxonomy metadata parsed from filenames."""
@@ -338,10 +358,10 @@ class HOGraspNetMANOContactDataset(Dataset):
 
 if __name__ == '__main__':
     train_ds = HOGraspNetMANOContactDataset(split='train', 
-                                            mode='prediction')
+                                            mode='skel_recon')
 
-    (total_pc, contact_map), taxo_label = train_ds[0]
-    print(total_pc.shape, contact_map.shape)
+    hand_pose, taxo_label = train_ds[0]
+    print(hand_pose.shape)
 
 
     '''

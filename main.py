@@ -54,7 +54,8 @@ def main():
     parser.add_argument('--config_name', default='mnist', type=str,
                         choices=['mnist', 'fmnist', 'news20', 'omniglot', 'cifar10', 'cifar100', 'celeba', 
                                  'dexgraspnet_toy', 'dexgraspnet', 'hograspnet_full_toy', 'hograspnet_uniform_toy',
-                                 'hograspnet_mano_contact_recon', 'hograspnet_pointcloud_contactmap_prediction'],
+                                 'hograspnet_mano_contact_recon', 'hograspnet_pointcloud_contactmap_prediction',
+                                 'hograspnet_handjoint_recon'],
                         help='the override file name for config.yml')
 
     args = parser.parse_args()

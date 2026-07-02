@@ -2,8 +2,6 @@
 Utility functions for data loading.
 """
 import os
-from datasets.dexgraspnet_toy import DexGraspNetToyDataset
-from datasets.hograspnet_toy import HOGraspNetToyDataset
 from datasets.hograspnet_contact_pred import HOGraspNetMANOContactDataset
 from datasets.augmentation_pc import RandomYawRotation, RandomJitter
 import torch
@@ -11,7 +9,7 @@ import torchvision
 import torchvision.transforms as T
 import numpy as np
 from torch.utils.data import TensorDataset, DataLoader, Subset, ConcatDataset
-from PIL import Image
+from PIL import Image 
 from sklearn.datasets import fetch_20newsgroups
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.model_selection import train_test_split
@@ -277,69 +275,6 @@ def get_data(configs):
 		trainset.dataset.targets = torch.zeros(trainset.dataset.attr.shape[0], dtype=torch.int8)
 		trainset_eval.dataset.targets = torch.zeros(trainset.dataset.attr.shape[0], dtype=torch.int8)
 		testset.dataset.targets = torch.zeros(trainset.dataset.attr.shape[0], dtype=torch.int8)
-
-	elif data_name == 'dexgraspnet_toy':
-		reset_random_seeds(configs['globals']['seed'])
-
-		transform_eval = T.Compose([
-			])
-		if augment is True:
-			aug_transforms = T.Compose([
-				RandomYawRotation(),
-				RandomJitter(),
-			])
-			if augmentation_method == ['simple']:
-				transform = aug_transforms
-			else:
-				transform = ContrastiveTransformations(aug_transforms, n_views=2)
-		else:
-			transform = transform_eval
-
-		trainset = DexGraspNetToyDataset(cfg=configs['data'], split='train', transform=transform)
-		trainset_eval = DexGraspNetToyDataset(cfg=configs['data'], split='train', transform=transform_eval)
-		testset = DexGraspNetToyDataset(cfg=configs['data'], split='test', transform=transform_eval)
-
-	elif data_name in ['hograspnet_full_toy', 'hograspnet_uniform_toy']:
-		reset_random_seeds(configs['globals']['seed'])
-
-		transform_eval = T.Compose([])
-
-		if augment is True:
-			aug_transforms = T.Compose([
-				RandomYawRotation(),
-				RandomJitter(),
-			])
-			if augmentation_method == ['simple']:
-				transform = aug_transforms
-			else:
-				transform = ContrastiveTransformations(aug_transforms, n_views=2)
-		else:
-			transform = transform_eval
-
-		trainset = HOGraspNetToyDataset(root=configs['data']['root'],
-								  		split='train',
-								  		setup=configs['data']['setup'],
-										test_ratio=configs['data']['test_ratio'],
-										split_trials=configs['data']['split_trials'],
-										transform=transform)
-		trainset_eval = HOGraspNetToyDataset(root=configs['data']['root'],
-								  		     split='train',
-								  			 setup=configs['data']['setup'],
-											 test_ratio=configs['data']['test_ratio'],
-											 split_trials=configs['data']['split_trials'],
-											 transform=transform_eval)
-		testset = HOGraspNetToyDataset(root=configs['data']['root'],
-								  	   split='test',
-								  	   setup=configs['data']['setup'],
-									   test_ratio=configs['data']['test_ratio'],
-									   split_trials=configs['data']['split_trials'],
-									   transform=transform_eval)
-		
-		# Debug 용 Subset을 써서 전체 동작을 확인하기 위해 데이터 수를 줄임
-		# debug_count = 100
-		# trainset = torch.utils.data.Subset(trainset, range(debug_count))
-		# trainset_eval = torch.utils.data.Subset(trainset_eval, range(debug_count))
-		# testset = torch.utils.data.Subset(testset, range(debug_count))
 
 	elif data_name in ['hograspnet_contact']:
 		reset_random_seeds(configs['globals']['seed'])
